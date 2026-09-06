@@ -1,0 +1,26 @@
+import { AlertTriangle, Check, ClipboardCheck, RotateCcw, UserMinus, UserPlus } from 'lucide-react'
+import { useState } from 'react'
+import { PageHeader } from '../components/PageHeader'
+import { EmptyState } from '../components/EmptyState'
+import { StatusBadge } from '../components/StatusBadge'
+import { validationTone } from '../components/statusTones'
+import { useDemo } from '../context/DemoContext'
+import { areas, demoUsers, projects } from '../data/demoData'
+import { formatDate, hasCompleteSourceData, validationLabels } from '../lib/businessRules'
+
+export function ValidationPage() {
+  const { employees, employeeExits, setEmployeeValidation, setExitValidation } = useDemo()
+  const [tab, setTab] = useState<'ENTRY' | 'EXIT'>('ENTRY')
+  const pendingEntries = employees.filter((employee) => ['SUBMITTED', 'REVISION_REQUIRED'].includes(employee.validationStatus))
+  const pendingExits = employeeExits.filter((exit) => ['SUBMITTED', 'REVISION_REQUIRED'].includes(exit.validationStatus))
+  const records = tab === 'ENTRY' ? pendingEntries : pendingExits
+  return <><PageHeader eyebrow="HR HEAD OFFICE" title="HR Validation" description="Periksa data yang dikirim Area Supporting sebelum diteruskan ke proses berikutnya." actions={<div className="queue-pill"><ClipboardCheck size={17} /> {pendingEntries.filter((i) => i.validationStatus === 'SUBMITTED').length + pendingExits.filter((i) => i.validationStatus === 'SUBMITTED').length} menunggu</div>} />
+    <div className="tabs"><button className={tab === 'ENTRY' ? 'active' : ''} onClick={() => setTab('ENTRY')}><UserPlus /> Employee Entry <span>{pendingEntries.length}</span></button><button className={tab === 'EXIT' ? 'active' : ''} onClick={() => setTab('EXIT')}><UserMinus /> Employee Exit <span>{pendingExits.length}</span></button></div>
+    <section className="card table-card"><div className="table-title"><div><span className="section-icon"><ClipboardCheck /></span><div><h2>{tab === 'ENTRY' ? 'Employee Entry Submission' : 'Employee Exit Submission'}</h2><p>Validasi hanya dapat dilakukan oleh HR Head Office.</p></div></div></div>
+      {records.length === 0 ? <EmptyState title="Queue validation kosong" description="Tidak ada submission yang perlu ditinjau." /> : <div className="validation-list">{tab === 'ENTRY' ? pendingEntries.map((employee) => {
+        const area = areas.find((item) => item.id === employee.areaId); const project = projects.find((item) => item.id === employee.projectId); const submitter = demoUsers.find((item) => item.id === employee.createdBy)
+        return <article className="validation-item" key={employee.id}><div className="validation-type entry"><UserPlus /></div><div className="validation-main"><div><span>EMPLOYEE ENTRY</span><h3>{employee.name}</h3><p>{employee.personnelId} · {area?.name ?? 'Area kosong'} · {project?.name ?? 'Project kosong'} · {employee.position ?? 'Posisi kosong'}</p></div><div className="validation-meta"><span>Dikirim oleh<strong>{submitter?.name ?? 'Demo User'}</strong></span><span>Tanggal submission<strong>{formatDate(employee.submittedAt, true)}</strong></span><StatusBadge tone={validationTone(employee.validationStatus)}>{validationLabels[employee.validationStatus]}</StatusBadge></div>{!hasCompleteSourceData(employee) && <div className="inline-warning"><AlertTriangle /> Data source kritikal belum lengkap.</div>}</div><div className="validation-actions"><button className="button success" onClick={() => setEmployeeValidation(employee.id, 'VALIDATED')}><Check /> Validate</button><button className="button danger-outline" onClick={() => setEmployeeValidation(employee.id, 'REVISION_REQUIRED')}><RotateCcw /> Request Revision</button></div></article>
+      }) : pendingExits.map((exit) => { const employee = employees.find((item) => item.id === exit.employeeId); if (!employee) return null; const area = areas.find((item) => item.id === employee.areaId); const project = projects.find((item) => item.id === employee.projectId); const submitter = demoUsers.find((item) => item.id === exit.createdBy)
+        return <article className="validation-item" key={exit.id}><div className="validation-type exit"><UserMinus /></div><div className="validation-main"><div><span>EMPLOYEE EXIT</span><h3>{employee.name}</h3><p>{area?.name ?? 'Area kosong'} · {project?.name ?? 'Project kosong'} · Exit {formatDate(exit.exitDate)}</p></div><div className="validation-meta"><span>Dikirim oleh<strong>{submitter?.name ?? 'Demo User'}</strong></span><span>Replacement<strong>{exit.replacementRequired ? 'Required' : 'Tidak diperlukan'}</strong></span><StatusBadge tone={validationTone(exit.validationStatus)}>{validationLabels[exit.validationStatus]}</StatusBadge></div>{exit.replacementRequired && !hasCompleteSourceData(employee) && <div className="inline-warning"><AlertTriangle /> Replacement Need akan ditandai karena data sumber belum lengkap.</div>}</div><div className="validation-actions"><button className="button success" onClick={() => setExitValidation(exit.id, 'VALIDATED')}><Check /> Validate</button><button className="button danger-outline" onClick={() => setExitValidation(exit.id, 'REVISION_REQUIRED')}><RotateCcw /> Request Revision</button></div></article> })}</div>}
+    </section></>
+}
