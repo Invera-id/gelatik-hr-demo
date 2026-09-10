@@ -60,7 +60,7 @@ Semua akun menggunakan password `password`.
 
 ## Skenario data demo
 
-- Success: Nanda Pratama digantikan Dony Saputra dalam dua hari kerja.
+- Success: Raka Adiputra digantikan Fikri Mahardika dalam dua hari kerja.
 - Wrong area: Andi Kurniawan dari Semarang ditolak untuk kebutuhan Bandung.
 - Over SLA: fulfillment Semarang memiliki gap enam hari kerja.
 - Incomplete source: Farhan Akbar belum memiliki Project sehingga matching diblokir setelah exit divalidasi.
@@ -81,6 +81,6 @@ Data aplikasi disimpan di `localStorage`, sementara sesi login berada di `sessio
 1. Login sebagai HR untuk menunjukkan dashboard lintas area dan validation queue.
 2. Validasi exit Farhan Akbar untuk memperlihatkan dependency pada source data yang tidak lengkap.
 3. Buka Replacement Detail dan tunjukkan alasan kandidat eligible/tidak eligible.
-4. Tunjukkan scenario Nanda → Dony yang `FULFILLED` serta Semarang yang `OVER_TARGET`.
+4. Tunjukkan scenario Raka → Fikri yang `FULFILLED` serta Semarang yang `OVER_TARGET`.
 5. Login sebagai Area Bandung untuk menunjukkan pembatasan area dan form input.
 6. Login sebagai Management untuk menunjukkan akses dashboard konsolidasi dan UI read-only.

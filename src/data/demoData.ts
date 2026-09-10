@@ -20,8 +20,8 @@ export const demoUsers: DemoUser[] = [
 ]
 
 const employeeSeed: Array<[string, string, string | null, string | null, string | null, string, string, string]> = [
-  ['EMP-001', 'Nanda Pratama', 'area-bandung', 'project-alpha-bandung', 'Sales', 'INACTIVE', 'SIGNED', 'VALIDATED'],
-  ['EMP-002', 'Dony Saputra', 'area-bandung', 'project-alpha-bandung', 'Sales', 'ACTIVE', 'SIGNED', 'VALIDATED'],
+  ['EMP-001', 'Raka Adiputra', 'area-bandung', 'project-alpha-bandung', 'Sales', 'INACTIVE', 'SIGNED', 'VALIDATED'],
+  ['EMP-002', 'Fikri Mahardika', 'area-bandung', 'project-alpha-bandung', 'Sales', 'ACTIVE', 'SIGNED', 'VALIDATED'],
   ['EMP-003', 'Andi Kurniawan', 'area-semarang', 'project-alpha-semarang', 'Sales', 'ACTIVE', 'SIGNED', 'VALIDATED'],
   ['EMP-004', 'Sari Wulandari', 'area-bandung', 'project-alpha-bandung', 'Team Leader', 'ACTIVE', 'SIGNED', 'VALIDATED'],
   ['EMP-005', 'Fajar Ramadhan', 'area-bandung', 'project-beta-bandung', 'Promotor', 'ACTIVE', 'SIGNED', 'VALIDATED'],
@@ -108,7 +108,7 @@ export const createInitialData = (): DemoData => {
       },
     ],
     movements: [
-      { id: 'move-001', employeeId: 'employee-002', type: 'FULFILLMENT', title: 'Replacement terpenuhi', description: 'Menggantikan Nanda Pratama dalam 2 hari kerja', date: '2026-08-05T09:00:00.000Z' },
+      { id: 'move-001', employeeId: 'employee-002', type: 'FULFILLMENT', title: 'Replacement terpenuhi', description: 'Menggantikan Raka Adiputra dalam 2 hari kerja', date: '2026-08-05T09:00:00.000Z' },
       { id: 'move-002', employeeId: 'employee-001', type: 'EXIT', title: 'Employee exit tervalidasi', description: 'Mengundurkan diri dari Project Alpha Bandung', date: '2026-08-04T04:00:00.000Z' },
       { id: 'move-003', employeeId: 'employee-008', type: 'FULFILLMENT', title: 'Replacement melewati SLA', description: 'Fulfillment tercapai dalam 6 hari kerja', date: '2026-08-17T07:00:00.000Z' },
       { id: 'move-004', employeeId: 'employee-013', type: 'ENTRY', title: 'Entry menunggu validasi', description: 'Data entry dikirim Area Bandung', date: '2026-09-03T03:15:00.000Z' },
