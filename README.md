@@ -1,4 +1,4 @@
-# Gelatik HR — Workforce Monitoring Demo V2
+# Gelatik HR — Workforce Monitoring Demo V3
 
 Frontend-only React/Vite prototype untuk memvalidasi requirement workforce movement, turnover, replacement, fulfillment, dan monitoring PT Gelatik Supra. Seluruh data bersifat fiktif dan disimpan lokal di browser.
 
@@ -38,7 +38,10 @@ Semua akun menggunakan password `password`.
 | Route | Fungsi |
 |---|---|
 | `/dashboard` | KPI, filter, charts, drill-down, SLA, kontrak, recent movement |
-| `/employees` | Master Employee sesuai scope |
+| `/employees` | Master Employee, Client filter, dan derived Employee Aktif tab |
+| `/projects` | Master Project CRUD/status dan list sesuai scope |
+| `/projects/:id` | Project Overview, Workforce, Monthly, Termination Analytics |
+| `/reports/analytics` | Monthly Client Summary, Client Quota, Pengakhiran Perjanjian |
 | `/employees/new` | Employee Entry |
 | `/employees/:id` | Current state, notes, flag, career timeline |
 | `/employees/:id/edit` | Basic edit / revision |
@@ -57,7 +60,7 @@ Semua akun menggunakan password `password`.
 ## Data, Excel, dan reset
 
 - Demo state memakai `localStorage`; sesi login memakai `sessionStorage`.
-- Menu profile menyediakan **Reset data demo** untuk mengembalikan employee, movement, exit, replacement, permission, policy, notes, flags, dan contract scenarios ke seed deterministik.
+- Menu profile menyediakan **Reset data demo** untuk mengembalikan employee, movement, exit, replacement, projects, quota, permission, policy, notes, flags, dan contract scenarios ke seed deterministik. Reset dianjurkan bila browser pernah dipakai untuk V2.
 - Export `.xlsx` diproses di browser; CSV menjadi fallback bila workbook gagal dibuat.
 - Import menerima `.xlsx` dan hanya field yang didokumentasikan. Duplicate Personnel ID harus dipilih **Skip** atau **Update current basic fields**; history tidak dihapus.
 
@@ -69,7 +72,11 @@ Repository menyertakan `vercel.json` untuk SPA deep-link rewrite ke `index.html`
 2. Framework preset: Vite.
 3. Build command: `npm run build`.
 4. Output directory: `dist`.
-5. Setelah deploy, uji refresh pada `/dashboard`, `/employees/employee-026`, dan `/replacements/need-chain-002`.
+5. Setelah deploy, uji refresh pada `/dashboard`, `/employees/employee-026`, `/projects/project-beta-bandung`, `/reports/analytics`, dan `/replacements/need-chain-002`.
+
+## Version 3 analytics
+
+Dashboard memakai istilah **Turnover** dan **Vacant** serta target fulfillment ≤ 3 hari kerja. Reference CSV di `docs/reference/` dipakai untuk membaca **header saja**; tidak ada baris employee referensi dalam aplikasi. Quota per project/bulan, Turnover %, Monthly Index, dan Pengakhiran Perjanjian adalah interpretasi demo yang perlu konfirmasi Gelatik. Lihat [V3 change log](docs/DEMO_V3_CHANGELOG.md) untuk flow presentasi dan formula.
 
 ## Batasan penting
 
