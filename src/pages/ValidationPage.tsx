@@ -5,13 +5,13 @@ import { PageHeader } from '../components/PageHeader'
 import { StatusBadge } from '../components/StatusBadge'
 import { validationTone } from '../components/statusTones'
 import { useDemo } from '../context/DemoContext'
-import { areas, demoUsers, projects } from '../data/demoData'
+import { areas, demoUsers } from '../data/demoData'
 import { formatDate, hasCompleteSourceData, validationLabels } from '../lib/businessRules'
 import { canValidateTransaction, hasPermission } from '../config/access'
 import { canAccessEmployee } from '../lib/businessRules'
 
 export function ValidationPage() {
-  const { currentUser, employees, employeeExits, movementRequests, permissionConfig, validationPolicy, setEmployeeValidation, setExitValidation, setMovementValidation } = useDemo()
+  const { currentUser, employees, projects, employeeExits, movementRequests, permissionConfig, validationPolicy, setEmployeeValidation, setExitValidation, setMovementValidation } = useDemo()
   const [tab, setTab] = useState<'ENTRY' | 'EXIT'>('ENTRY')
   const pendingEntries = employees.filter((employee) => ['SUBMITTED', 'REVISION_REQUIRED'].includes(employee.validationStatus) && (!currentUser || canAccessEmployee(currentUser, employee, permissionConfig)))
   const pendingExits = employeeExits.filter((exit) => { const employee = employees.find((item) => item.id === exit.employeeId); return ['SUBMITTED', 'REVISION_REQUIRED'].includes(exit.validationStatus) && Boolean(employee && (!currentUser || canAccessEmployee(currentUser, employee, permissionConfig))) })

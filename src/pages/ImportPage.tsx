@@ -3,7 +3,7 @@ import { useRef, useState, type ChangeEvent } from 'react'
 import { PageHeader } from '../components/PageHeader'
 import { StatusBadge } from '../components/StatusBadge'
 import { useDemo } from '../context/DemoContext'
-import { areas, projects } from '../data/demoData'
+import { areas } from '../data/demoData'
 import { exportBusinessTable } from '../lib/excelExport'
 import { importColumns, parseEmployeeImport, type DuplicateDecision, type EmployeeImportPreview } from '../lib/importRules'
 import type { Employee } from '../types'
@@ -16,7 +16,7 @@ const templateRows = [
 ]
 
 export function ImportPage() {
-  const { currentUser, employees, importEmployees } = useDemo()
+  const { currentUser, employees, projects, importEmployees } = useDemo()
   const inputRef = useRef<HTMLInputElement>(null)
   const [preview, setPreview] = useState<EmployeeImportPreview | null>(null)
   const [fileName, setFileName] = useState('')
@@ -44,8 +44,8 @@ export function ImportPage() {
     const records: Employee[] = accepted.map((row, index) => {
       const existing = employees.find((employee) => employee.id === row.duplicateEmployeeId)
       const fields = row.fields!
-      if (existing) return { ...existing, name: fields.name, areaId: fields.areaId, projectId: fields.projectId, position: fields.position, joinDate: fields.joinDate, employmentStatus: fields.employmentStatus, contractEndDate: fields.contractEndDate, contractStatus: fields.contractEndDate ? 'SIGNED' : existing.contractStatus, bpjsStatus: fields.bpjsStatus, updatedAt: now }
-      return { id: `employee-import-${Date.now()}-${index}`, personnelId: fields.personnelId, name: fields.name, areaId: fields.areaId, subArea: null, projectId: fields.projectId, position: fields.position, employmentStatus: fields.employmentStatus, joinDate: fields.joinDate, contractStartDate: fields.joinDate, contractEndDate: fields.contractEndDate, contractStatus: fields.contractEndDate ? 'SIGNED' : 'NOT_AVAILABLE', bpjsStatus: fields.bpjsStatus, createdBy: currentUser.id, validationStatus: 'VALIDATED', validatedBy: currentUser.id, validatedAt: now, submittedAt: now, revisionNote: null, createdAt: now, updatedAt: now }
+      if (existing) return { ...existing, name: fields.name, areaId: fields.areaId, projectId: fields.projectId, position: fields.position, joinDate: fields.joinDate, employmentStatus: fields.employmentStatus, contractEndDate: fields.contractEndDate, contractStatus: fields.contractEndDate ? 'SIGNED' : existing.contractStatus, bpjsStatus: fields.bpjsStatus, profile: { ...existing.profile, areaCbs: areas.find((area) => area.id === fields.areaId)?.name ?? null }, updatedAt: now }
+      return { id: `employee-import-${Date.now()}-${index}`, personnelId: fields.personnelId, name: fields.name, areaId: fields.areaId, subArea: null, projectId: fields.projectId, position: fields.position, employmentStatus: fields.employmentStatus, joinDate: fields.joinDate, contractStartDate: fields.joinDate, contractEndDate: fields.contractEndDate, contractStatus: fields.contractEndDate ? 'SIGNED' : 'NOT_AVAILABLE', bpjsStatus: fields.bpjsStatus, profile: { areaCbs: areas.find((area) => area.id === fields.areaId)?.name ?? null }, createdBy: currentUser.id, validationStatus: 'VALIDATED', validatedBy: currentUser.id, validatedAt: now, submittedAt: now, revisionNote: null, createdAt: now, updatedAt: now }
     })
     importEmployees(records)
     const updated = records.filter((record) => employees.some((employee) => employee.id === record.id)).length

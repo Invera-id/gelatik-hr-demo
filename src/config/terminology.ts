@@ -4,6 +4,8 @@ export const terminology = {
   employeeMaster: 'Master Employee',
   employeeEntry: 'Employee Entry',
   employeeExit: 'Employee Exit',
+  turnover: 'Turnover',
+  vacant: 'Vacant',
   movementHistory: 'Employee Movement History',
   replacementNeed: 'Replacement Need',
   replacementFulfillment: 'Replacement & Fulfillment',

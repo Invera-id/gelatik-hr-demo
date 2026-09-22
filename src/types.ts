@@ -29,6 +29,85 @@ export interface Project {
   name: string
   clientName: string
   areaId: string
+  subArea: string | null
+  status: 'ACTIVE' | 'INACTIVE'
+  startDate: string | null
+  endDate: string | null
+}
+
+export interface ProjectQuota {
+  id: string
+  projectId: string
+  period: string
+  quota: number
+}
+
+/** Optional dummy-only fields grouped in the UI; no real CSV rows are imported. */
+export interface EmployeeProfile {
+  areaCbs?: string | null
+  nationalId?: string | null
+  birthPlace?: string | null
+  birthDate?: string | null
+  gender?: string | null
+  ktpAddress?: string | null
+  ktpRt?: string | null
+  ktpRw?: string | null
+  ktpKelurahan?: string | null
+  ktpKecamatan?: string | null
+  ktpCity?: string | null
+  ktpProvince?: string | null
+  ktpPostalCode?: string | null
+  religion?: string | null
+  domicileAddress?: string | null
+  domicileRt?: string | null
+  domicileRw?: string | null
+  domicileKelurahan?: string | null
+  domicileKecamatan?: string | null
+  domicileCity?: string | null
+  domicileProvince?: string | null
+  domicilePostalCode?: string | null
+  maritalStatus?: string | null
+  education?: string | null
+  homePhone?: string | null
+  mobilePhone?: string | null
+  email?: string | null
+  initialDepositDate?: string | null
+  bankAccountNumber?: string | null
+  bankAccountName?: string | null
+  taxId?: string | null
+  program?: string | null
+  teamLeader?: string | null
+  employeeStatus?: string | null
+  outlet?: string | null
+  coverageArea?: string | null
+  jamsostekNumber?: string | null
+  bpjsHealthNumber?: string | null
+  motherName?: string | null
+  motherNationalId?: string | null
+  mutationDate?: string | null
+  exitDate?: string | null
+  exitReason?: string | null
+  penalty?: string | null
+  academicScore?: string | null
+  personalityScore?: string | null
+  basicAbilityScore?: string | null
+  logicScore?: string | null
+  height?: string | null
+  weight?: string | null
+  noGlasses?: string | null
+  notCrossEyed?: string | null
+  notColorBlind?: string | null
+  noBraces?: string | null
+  healthyTeeth?: string | null
+  healthySkin?: string | null
+  normalPosture?: string | null
+  normalWalking?: string | null
+  pregnancyCondition?: string | null
+  clearSpeech?: string | null
+  agreementTermination?: 'YA' | 'TIDAK' | null
+  warningLetter?: string | null
+  companyName?: string | null
+  tenureLabel?: string | null
 }
 
 export interface DemoUser {
@@ -54,6 +133,7 @@ export interface Employee {
   contractEndDate: string | null
   contractStatus: ContractStatus
   bpjsStatus: string | null
+  profile?: EmployeeProfile
   createdBy: string
   validationStatus: ValidationStatus
   validationTransaction?: Extract<TransactionType, 'EMPLOYEE_ENTRY' | 'EMPLOYEE_BASIC_EDIT'>
@@ -165,6 +245,8 @@ export interface EmployeeMovement {
 }
 
 export interface DemoData {
+  projects: Project[]
+  projectQuotas: ProjectQuota[]
   employees: Employee[]
   employeeExits: EmployeeExit[]
   replacementNeeds: ReplacementNeed[]

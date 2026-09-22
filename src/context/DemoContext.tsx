@@ -1,9 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useMemo, useReducer, type ReactNode } from 'react'
-import { createInitialData, demoUsers } from '../data/demoData'
+import { areas, createInitialData, demoUsers } from '../data/demoData'
 import { allowedAreaIds, canValidateTransaction, cloneDefaultPermissions, defaultValidationPolicy, hasPermission } from '../config/access'
 import { calculateWorkingDayGap, getCandidateEligibility, getFulfillmentBlockers, getGapStatus, hasCompleteSourceData } from '../lib/businessRules'
-import type { DemoData, DemoUser, Employee, EmployeeExit, EmployeeFlagStatus, EmployeeMovement, MovementEvent, Permission, PlacementChangeRequest, ReplacementNeed, Role, ScopeType, TransactionType, ValidationStatus, ValidatorAuthority } from '../types'
+import type { DemoData, DemoUser, Employee, EmployeeExit, EmployeeFlagStatus, EmployeeMovement, MovementEvent, Permission, PlacementChangeRequest, Project, ProjectQuota, ReplacementNeed, Role, ScopeType, TransactionType, ValidationStatus, ValidatorAuthority } from '../types'
 
 const DATA_KEY = 'gelatik-demo-data-v2'
 const USER_KEY = 'gelatik-demo-user-v1'
@@ -32,6 +32,9 @@ export type DemoAction =
   | { type: 'SET_EMPLOYEE_FLAG'; employeeId: string; status: EmployeeFlagStatus; reason: string; notes: string; userId: string }
   | { type: 'REENTRY_EMPLOYEE'; employeeId: string; areaId: string; projectId: string; position: string; joinDate: string; notes: string; userId: string }
   | { type: 'IMPORT_EMPLOYEES'; employees: Employee[] }
+  | { type: 'SAVE_PROJECT'; project: Project }
+  | { type: 'SET_PROJECT_STATUS'; projectId: string; status: Project['status'] }
+  | { type: 'SAVE_PROJECT_QUOTA'; quota: ProjectQuota }
 
 const loadData = (): DemoData => {
   try {
@@ -39,7 +42,11 @@ const loadData = (): DemoData => {
     if (!stored) return createInitialData()
     const parsed = JSON.parse(stored) as Partial<DemoData>
     const fresh = createInitialData()
-    return { ...fresh, ...parsed, permissionConfig: parsed.permissionConfig ?? cloneDefaultPermissions(), validationPolicy: parsed.validationPolicy ?? { ...defaultValidationPolicy } }
+    const employees = (parsed.employees ?? fresh.employees).map((employee) => {
+      const seeded = fresh.employees.find((item) => item.id === employee.id && item.personnelId === employee.personnelId)
+      return employee.profile || !seeded ? employee : { ...employee, profile: { ...seeded.profile, areaCbs: areas.find((area) => area.id === employee.areaId)?.name ?? null } }
+    })
+    return { ...fresh, ...parsed, employees, permissionConfig: parsed.permissionConfig ?? cloneDefaultPermissions(), validationPolicy: parsed.validationPolicy ?? { ...defaultValidationPolicy } }
   } catch {
     return createInitialData()
   }
@@ -51,7 +58,7 @@ const createMovement = (employeeId: string, type: MovementEvent['type'], title: 
 })
 
 const persist = (state: DemoState): DemoState => {
-  const data: DemoData = { employees: state.employees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: state.employeeMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy }
+  const data: DemoData = { projects: state.projects, projectQuotas: state.projectQuotas, employees: state.employees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: state.employeeMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy }
   localStorage.setItem(DATA_KEY, JSON.stringify(data))
   return state
 }
@@ -160,7 +167,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       const now = new Date().toISOString()
       const movementRequests = state.movementRequests.map((item) => item.id === request.id ? { ...item, validationStatus: action.status, revisionNote: action.status === 'REVISION_REQUIRED' ? action.note?.trim() || 'Perlu koreksi sebelum validasi.' : null, validatedBy: action.validatorId, validatedAt: now, updatedAt: now } : item)
       if (action.status !== 'VALIDATED') return persist({ ...state, movementRequests })
-      const employees = state.employees.map((employee) => employee.id === request.employeeId ? { ...employee, areaId: request.newAreaId, projectId: request.newProjectId, position: request.newPosition, updatedAt: now } : employee)
+      const employees = state.employees.map((employee) => employee.id === request.employeeId ? { ...employee, areaId: request.newAreaId, projectId: request.newProjectId, position: request.newPosition, profile: { ...employee.profile, areaCbs: areas.find((area) => area.id === request.newAreaId)?.name ?? null }, updatedAt: now } : employee)
       const history: EmployeeMovement = { id: `career-${Date.now()}`, employeeId: request.employeeId, movementType: request.movementType, effectiveDate: request.effectiveDate, previousAreaId: request.previousAreaId, newAreaId: request.newAreaId, previousProjectId: request.previousProjectId, newProjectId: request.newProjectId, previousPosition: request.previousPosition, newPosition: request.newPosition, notes: request.notes, createdBy: request.createdBy, createdAt: now }
       return persist({ ...state, employees, employeeMovements: [history, ...state.employeeMovements], movementRequests })
     }
@@ -177,7 +184,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       const target = state.employees.find((item) => item.id === action.employeeId)
       if (!target || target.employmentStatus !== 'INACTIVE') return state
       const now = new Date().toISOString()
-      const employees = state.employees.map((item) => item.id === target.id ? { ...item, areaId: action.areaId, projectId: action.projectId, position: action.position, joinDate: action.joinDate, employmentStatus: 'ACTIVE' as const, validationStatus: 'VALIDATED' as const, validatedBy: action.userId, validatedAt: now, updatedAt: now } : item)
+      const employees = state.employees.map((item) => item.id === target.id ? { ...item, areaId: action.areaId, projectId: action.projectId, position: action.position, joinDate: action.joinDate, profile: { ...item.profile, areaCbs: areas.find((area) => area.id === action.areaId)?.name ?? null }, employmentStatus: 'ACTIVE' as const, validationStatus: 'VALIDATED' as const, validatedBy: action.userId, validatedAt: now, updatedAt: now } : item)
       const history: EmployeeMovement = { id: `career-reentry-${Date.now()}`, employeeId: target.id, movementType: 'REENTRY', effectiveDate: action.joinDate, previousAreaId: target.areaId, newAreaId: action.areaId, previousProjectId: target.projectId, newProjectId: action.projectId, previousPosition: target.position, newPosition: action.position, notes: action.notes, createdBy: action.userId, createdAt: now }
       return persist({ ...state, employees, employeeMovements: [history, ...state.employeeMovements] })
     }
@@ -188,6 +195,18 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       const employees = [...action.employees, ...state.employees.filter((employee) => !importedIds.has(employee.id))]
       const histories: EmployeeMovement[] = action.employees.filter((employee) => !existingIds.has(employee.id)).map((employee) => ({ id: `career-import-${employee.id}`, employeeId: employee.id, movementType: 'JOIN', effectiveDate: employee.joinDate ?? employee.createdAt.slice(0, 10), previousAreaId: null, newAreaId: employee.areaId, previousProjectId: null, newProjectId: employee.projectId, previousPosition: null, newPosition: employee.position, notes: 'Employee ditambahkan melalui Prototype Import Excel.', createdBy: employee.createdBy, createdAt: employee.createdAt }))
       return persist({ ...state, employees, employeeMovements: [...histories, ...state.employeeMovements] })
+    }
+    case 'SAVE_PROJECT': {
+      if (!action.project.name.trim() || !action.project.clientName.trim() || !action.project.areaId) return state
+      const projects = state.projects.some((item) => item.id === action.project.id) ? state.projects.map((item) => item.id === action.project.id ? action.project : item) : [...state.projects, action.project]
+      return persist({ ...state, projects })
+    }
+    case 'SET_PROJECT_STATUS':
+      return persist({ ...state, projects: state.projects.map((item) => item.id === action.projectId ? { ...item, status: action.status } : item) })
+    case 'SAVE_PROJECT_QUOTA': {
+      if (!/^\d{4}-\d{2}$/.test(action.quota.period) || action.quota.quota < 0 || !Number.isFinite(action.quota.quota) || !state.projects.some((item) => item.id === action.quota.projectId)) return state
+      const projectQuotas = state.projectQuotas.filter((item) => !(item.projectId === action.quota.projectId && item.period === action.quota.period))
+      return persist({ ...state, projectQuotas: [...projectQuotas, action.quota] })
     }
   }
 }
@@ -213,6 +232,9 @@ interface DemoContextValue extends DemoData {
   setEmployeeFlag: (employeeId: string, status: EmployeeFlagStatus, reason: string, notes: string) => void
   reentryEmployee: (employeeId: string, areaId: string, projectId: string, position: string, joinDate: string, notes: string) => void
   importEmployees: (employees: Employee[]) => void
+  saveProject: (project: Project) => void
+  setProjectStatus: (projectId: string, status: Project['status']) => void
+  saveProjectQuota: (quota: ProjectQuota) => void
 }
 
 const DemoContext = createContext<DemoContextValue | null>(null)
@@ -231,7 +253,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   }
 
   const value: DemoContextValue = {
-    employees: state.employees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: state.employeeMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy, currentUser,
+    projects: state.projects, projectQuotas: state.projectQuotas, employees: state.employees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: state.employeeMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy, currentUser,
     login: (email, password) => {
       const user = demoUsers.find((item) => item.email.toLowerCase() === email.toLowerCase().trim() && item.password === password)
       if (!user) return false
@@ -259,6 +281,9 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     setEmployeeFlag: (employeeId, status, reason, notes) => currentUser && hasPermission(currentUser, state.permissionConfig, 'edit_employee') && dispatch({ type: 'SET_EMPLOYEE_FLAG', employeeId, status, reason, notes, userId: currentUser.id }),
     reentryEmployee: (employeeId, areaId, projectId, position, joinDate, notes) => currentUser && canUseArea(areaId) && hasPermission(currentUser, state.permissionConfig, 'create_employee') && dispatch({ type: 'REENTRY_EMPLOYEE', employeeId, areaId, projectId, position, joinDate, notes, userId: currentUser.id }),
     importEmployees: (employees) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && hasPermission(currentUser, state.permissionConfig, 'create_employee') && dispatch({ type: 'IMPORT_EMPLOYEES', employees }),
+    saveProject: (project) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && dispatch({ type: 'SAVE_PROJECT', project }),
+    setProjectStatus: (projectId, status) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && dispatch({ type: 'SET_PROJECT_STATUS', projectId, status }),
+    saveProjectQuota: (quota) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && dispatch({ type: 'SAVE_PROJECT_QUOTA', quota }),
   }
   return <DemoContext.Provider value={value}>{children}</DemoContext.Provider>
 }

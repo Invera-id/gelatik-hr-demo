@@ -3,12 +3,12 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
 import { useDemo } from '../context/DemoContext'
-import { areas, projects } from '../data/demoData'
+import { areas } from '../data/demoData'
 import { canAccessEmployee, hasCompleteSourceData } from '../lib/businessRules'
 import type { EmployeeExit } from '../types'
 
 export function EmployeeExitPage() {
-  const { employeeId } = useParams(); const { currentUser, employees, employeeExits, permissionConfig, saveExit } = useDemo(); const navigate = useNavigate()
+  const { employeeId } = useParams(); const { currentUser, employees, projects, employeeExits, permissionConfig, saveExit } = useDemo(); const navigate = useNavigate()
   const employee = employees.find((item) => item.id === employeeId); const existing = employeeExits.find((item) => item.employeeId === employeeId && ['DRAFT', 'SUBMITTED', 'REVISION_REQUIRED'].includes(item.validationStatus))
   const [exitDate, setExitDate] = useState(existing?.exitDate ?? ''); const [reason, setReason] = useState(existing?.exitReason ?? ''); const [replacementRequired, setReplacementRequired] = useState(existing?.replacementRequired ?? true); const [intent, setIntent] = useState<'DRAFT' | 'SUBMITTED'>('DRAFT')
   if (!currentUser || !employee || !canAccessEmployee(currentUser, employee, permissionConfig)) return <Navigate to="/employees" replace />

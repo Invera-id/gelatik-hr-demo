@@ -6,7 +6,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import { replacementTone, validationTone } from '../components/statusTones'
 import { allowedAreaIds, hasPermission } from '../config/access'
 import { useDemo } from '../context/DemoContext'
-import { areas, projects } from '../data/demoData'
+import { areas } from '../data/demoData'
 import { contractLabels, formatDate, getCandidateEligibility, getFulfillmentBlockers, hasCompleteSourceData, replacementLabels, validationLabels } from '../lib/businessRules'
 import type { ReplacementNeed } from '../types'
 
@@ -30,7 +30,7 @@ const buildChain = (selected: ReplacementNeed, all: ReplacementNeed[]) => {
 
 export function ReplacementDetailPage() {
   const { needId } = useParams()
-  const { currentUser, replacementNeeds, employees, permissionConfig, matchCandidate, fulfillNeed } = useDemo()
+  const { currentUser, replacementNeeds, employees, projects, permissionConfig, matchCandidate, fulfillNeed } = useDemo()
   const [search, setSearch] = useState('')
   const need = replacementNeeds.find((item) => item.id === needId)
   const scopedAreas = currentUser ? allowedAreaIds(currentUser, permissionConfig) : []

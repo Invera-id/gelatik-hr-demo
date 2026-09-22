@@ -5,12 +5,12 @@ import { PageHeader } from '../components/PageHeader'
 import { StatusBadge } from '../components/StatusBadge'
 import { replacementTone } from '../components/statusTones'
 import { useDemo } from '../context/DemoContext'
-import { areas, demoUsers, projects } from '../data/demoData'
+import { areas, demoUsers } from '../data/demoData'
 import { formatDate, hasCompleteSourceData, replacementLabels } from '../lib/businessRules'
 import { allowedAreaIds } from '../config/access'
 
 export function ReplacementsPage() {
-  const { currentUser, replacementNeeds, employees, permissionConfig } = useDemo(); const user = currentUser ?? demoUsers[0]
+  const { currentUser, replacementNeeds, employees, projects, permissionConfig } = useDemo(); const user = currentUser ?? demoUsers[0]
   const scopedAreas = useMemo(() => allowedAreaIds(user, permissionConfig), [permissionConfig, user])
   const [search, setSearch] = useState(''); const [areaId, setAreaId] = useState(scopedAreas?.length === 1 ? scopedAreas[0] : ''); const [projectId, setProjectId] = useState(''); const [status, setStatus] = useState('')
   const visible = useMemo(() => replacementNeeds.filter((need) => (scopedAreas === null || Boolean(need.areaId && scopedAreas.includes(need.areaId))) && (!areaId || need.areaId === areaId) && (!projectId || need.projectId === projectId) && (!status || need.status === status) && (!search || employees.find((employee) => employee.id === need.originalEmployeeId)?.name.toLowerCase().includes(search.toLowerCase()) || need.id.toLowerCase().includes(search.toLowerCase()))), [areaId, employees, projectId, replacementNeeds, scopedAreas, search, status])

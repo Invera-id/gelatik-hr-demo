@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { PageHeader } from '../components/PageHeader'
 import { allowedAreaIds } from '../config/access'
 import { useDemo } from '../context/DemoContext'
-import { areas, projects } from '../data/demoData'
+import { areas } from '../data/demoData'
 import { formatDate, replacementLabels, roleLabels } from '../lib/businessRules'
 import { selectDashboardData } from '../lib/dashboardRules'
 import { exportBusinessTable, type ExportTable } from '../lib/excelExport'
@@ -14,7 +14,7 @@ const today = '2026-09-14'
 const fileStamp = today.replaceAll('-', '')
 
 export function ExportPage() {
-  const { currentUser, employees, employeeExits, replacementNeeds, employeeMovements, permissionConfig } = useDemo()
+  const { currentUser, employees, projects, employeeExits, replacementNeeds, employeeMovements, permissionConfig } = useDemo()
   const scopedAreas = useMemo(() => currentUser ? allowedAreaIds(currentUser, permissionConfig) : [], [currentUser, permissionConfig])
   const initialArea = scopedAreas?.length === 1 ? scopedAreas[0] : ''
   const [areaId, setAreaId] = useState(initialArea)

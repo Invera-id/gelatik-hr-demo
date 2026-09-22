@@ -17,6 +17,9 @@ import { EmployeeMovementPage } from './pages/EmployeeMovementPage'
 import { ReentryPage } from './pages/ReentryPage'
 import { ExportPage } from './pages/ExportPage'
 import { ImportPage } from './pages/ImportPage'
+import { ProjectsPage } from './pages/ProjectsPage'
+import { ProjectDetailPage } from './pages/ProjectDetailPage'
+import { AnalyticsPage } from './pages/AnalyticsPage'
 import { hasPermission } from './config/access'
 import type { Permission } from './types'
 
@@ -55,6 +58,9 @@ export default function App() {
       <Route path="employees/:employeeId/movement" element={<PermissionRoute permission="edit_employee"><EmployeeMovementPage /></PermissionRoute>} />
       <Route path="employees/:employeeId/reentry" element={<PermissionRoute permission="create_employee"><ReentryPage /></PermissionRoute>} />
       <Route path="movements" element={<PermissionRoute permission="view_employee"><MovementHistoryPage /></PermissionRoute>} />
+      <Route path="projects" element={<PermissionRoute permission="view_employee"><ProjectsPage /></PermissionRoute>} />
+      <Route path="projects/:projectId" element={<PermissionRoute permission="view_employee"><ProjectDetailPage /></PermissionRoute>} />
+      <Route path="reports/analytics" element={<PermissionRoute permission="view_employee"><AnalyticsPage /></PermissionRoute>} />
       <Route path="validation" element={<PermissionRoute permission={['validate_employee', 'validate_exit']}><ValidationPage /></PermissionRoute>} />
       <Route path="replacements" element={<PermissionRoute permission="view_replacement"><ReplacementsPage /></PermissionRoute>} />
       <Route path="replacements/:needId" element={<PermissionRoute permission="view_replacement"><ReplacementDetailPage /></PermissionRoute>} />

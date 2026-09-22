@@ -3,13 +3,13 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
 import { useDemo } from '../context/DemoContext'
-import { areas, positions, projects } from '../data/demoData'
+import { areas, positions } from '../data/demoData'
 import { canAccessEmployee } from '../lib/businessRules'
 import type { ContractStatus, Employee } from '../types'
 import { allowedAreaIds } from '../config/access'
 
 export function EmployeeEntryPage() {
-  const { employeeId } = useParams(); const { currentUser, employees, saveEmployee, permissionConfig } = useDemo(); const navigate = useNavigate()
+  const { employeeId } = useParams(); const { currentUser, employees, projects, saveEmployee, permissionConfig } = useDemo(); const navigate = useNavigate()
   const existing = employees.find((item) => item.id === employeeId)
   const accessibleAreas = currentUser ? allowedAreaIds(currentUser, permissionConfig) : []
   const lockedArea = accessibleAreas?.length === 1 ? accessibleAreas[0] : null
@@ -19,7 +19,7 @@ export function EmployeeEntryPage() {
   const update = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value, ...(key === 'areaId' ? { projectId: '' } : {}) }))
   const submit = (event: FormEvent) => {
     event.preventDefault(); const now = new Date().toISOString()
-    const employee: Employee = { id: existing?.id ?? `employee-${now}`, personnelId: form.personnelId, name: form.name, areaId: form.areaId || null, subArea: existing?.subArea ?? null, projectId: form.projectId || null, position: form.position || null, employmentStatus: existing?.employmentStatus ?? 'ACTIVE', joinDate: form.joinDate || null, contractStartDate: form.contractStartDate || null, contractEndDate: form.contractEndDate || null, contractStatus: form.contractStatus as ContractStatus, bpjsStatus: form.bpjsStatus || null, createdBy: existing?.createdBy ?? currentUser.id, validationStatus: intent, validationTransaction: existing ? 'EMPLOYEE_BASIC_EDIT' : 'EMPLOYEE_ENTRY', validatedBy: intent === 'SUBMITTED' ? null : existing?.validatedBy ?? null, validatedAt: intent === 'SUBMITTED' ? null : existing?.validatedAt ?? null, submittedAt: intent === 'SUBMITTED' ? now : existing?.submittedAt ?? null, revisionNote: intent === 'SUBMITTED' ? null : existing?.revisionNote ?? null, createdAt: existing?.createdAt ?? now, updatedAt: now }
+    const employee: Employee = { id: existing?.id ?? `employee-${now}`, personnelId: form.personnelId, name: form.name, areaId: form.areaId || null, subArea: existing?.subArea ?? null, projectId: form.projectId || null, position: form.position || null, employmentStatus: existing?.employmentStatus ?? 'ACTIVE', joinDate: form.joinDate || null, contractStartDate: form.contractStartDate || null, contractEndDate: form.contractEndDate || null, contractStatus: form.contractStatus as ContractStatus, bpjsStatus: form.bpjsStatus || null, profile: { ...existing?.profile, areaCbs: areas.find((area) => area.id === form.areaId)?.name ?? null }, createdBy: existing?.createdBy ?? currentUser.id, validationStatus: intent, validationTransaction: existing ? 'EMPLOYEE_BASIC_EDIT' : 'EMPLOYEE_ENTRY', validatedBy: intent === 'SUBMITTED' ? null : existing?.validatedBy ?? null, validatedAt: intent === 'SUBMITTED' ? null : existing?.validatedAt ?? null, submittedAt: intent === 'SUBMITTED' ? now : existing?.submittedAt ?? null, revisionNote: intent === 'SUBMITTED' ? null : existing?.revisionNote ?? null, createdAt: existing?.createdAt ?? now, updatedAt: now }
     saveEmployee(employee); navigate(`/employees/${employee.id}`)
   }
   return <><Link to={existing ? `/employees/${existing.id}` : '/employees'} className="back-link"><ArrowLeft size={16} /> Kembali</Link><PageHeader eyebrow="AREA INPUT" title={existing ? 'Edit Employee' : 'Employee Entry'} description="Lengkapi data berdasarkan source data yang disediakan oleh pemilik data." />

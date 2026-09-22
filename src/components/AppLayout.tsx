@@ -11,6 +11,8 @@ import { terminology as term } from '../config/terminology'
 const navItems: Array<{ to: string; label: string; icon: typeof BarChart3; permission?: Permission | Permission[]; superOnly?: boolean }> = [
   { to: '/dashboard', label: 'Dashboard', icon: BarChart3, permission: 'view_dashboard' },
   { to: '/employees', label: term.employeeMaster, icon: Users, permission: 'view_employee' },
+  { to: '/projects', label: 'Projects', icon: BriefcaseBusiness, permission: 'view_employee' },
+  { to: '/reports/analytics', label: 'Analytics / Reports', icon: BarChart3, permission: 'view_employee' },
   { to: '/employees/new', label: term.employeeEntry, icon: UserPlus, permission: 'create_employee' },
   { to: '/import', label: 'Import Excel', icon: FileUp, permission: 'create_employee' },
   { to: '/movements', label: term.movementHistory, icon: History, permission: 'view_employee' },

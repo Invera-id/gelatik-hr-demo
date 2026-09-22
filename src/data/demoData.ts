@@ -8,11 +8,17 @@ export const areas: Area[] = [
 ]
 
 export const projects: Project[] = [
-  { id: 'project-alpha-bandung', name: 'Project Alpha Bandung', clientName: 'PT Arunika Niaga', areaId: 'area-bandung' },
-  { id: 'project-beta-bandung', name: 'Project Beta Bandung', clientName: 'PT Bintang Retail', areaId: 'area-bandung' },
-  { id: 'project-alpha-semarang', name: 'Project Alpha Semarang', clientName: 'PT Arunika Niaga', areaId: 'area-semarang' },
-  { id: 'project-gamma-jakarta', name: 'Project Gamma Jakarta', clientName: 'PT Cakrawala Distribusi', areaId: 'area-jakarta' },
+  { id: 'project-alpha-bandung', name: 'Project Alpha Bandung', clientName: 'PT Arunika Niaga', areaId: 'area-bandung', subArea: 'Bandung Raya', status: 'ACTIVE', startDate: '2024-01-01', endDate: null },
+  { id: 'project-beta-bandung', name: 'Project Beta Bandung', clientName: 'PT Bintang Retail', areaId: 'area-bandung', subArea: 'Bandung Timur', status: 'ACTIVE', startDate: '2024-06-01', endDate: null },
+  { id: 'project-alpha-semarang', name: 'Project Alpha Semarang', clientName: 'PT Arunika Niaga', areaId: 'area-semarang', subArea: 'Semarang Kota', status: 'ACTIVE', startDate: '2024-01-01', endDate: null },
+  { id: 'project-gamma-jakarta', name: 'Project Gamma Jakarta', clientName: 'PT Cakrawala Distribusi', areaId: 'area-jakarta', subArea: 'Jakarta Pusat', status: 'ACTIVE', startDate: '2025-01-01', endDate: null },
 ]
+
+export const projectQuotas = projects.flatMap((project, index) => [
+  { id: `quota-${index}-2026-07`, projectId: project.id, period: '2026-07', quota: [12, 9, 10, 13][index] },
+  { id: `quota-${index}-2026-08`, projectId: project.id, period: '2026-08', quota: [13, 10, 11, 14][index] },
+  { id: `quota-${index}-2026-09`, projectId: project.id, period: '2026-09', quota: [14, 11, 12, 15][index] },
+])
 
 export const demoUsers: DemoUser[] = [
   { id: 'user-bandung', name: 'Rina Area Bandung', email: 'bandung@demo.test', password: 'password', role: 'AREA_SUPPORT', areaId: 'area-bandung' },
@@ -89,6 +95,34 @@ export const createInitialData = (): DemoData => {
       contractEndDate: contractEndDates[personnelId] ?? '2026-12-31',
       contractStatus: contractStatus as Employee['contractStatus'],
       bpjsStatus: index % 5 === 0 ? 'IN_PROCESS' : 'ACTIVE',
+      profile: {
+        areaCbs: areas.find((area) => area.id === areaId)?.name ?? null,
+        birthPlace: ['Bandung', 'Semarang', 'Jakarta'][index % 3],
+        birthDate: `199${index % 8}-0${index % 8 + 1}-15`,
+        gender: index % 2 ? 'Perempuan' : 'Laki-laki',
+        ktpCity: ['Bandung', 'Semarang', 'Jakarta'][index % 3],
+        ktpProvince: index % 3 === 2 ? 'DKI Jakarta' : 'Jawa Barat',
+        domicileCity: areas.find((area) => area.id === areaId)?.name ?? null,
+        maritalStatus: index % 3 ? 'Belum Menikah' : 'Menikah',
+        education: 'SMA / Sederajat',
+        email: `dummy.${personnelId.toLowerCase()}@example.test`,
+        mobilePhone: '08xx-xxxx-xxxx',
+        program: 'Workforce Monitoring Demo',
+        teamLeader: index % 3 ? 'Sari Wulandari' : 'Nisa Rahmawati',
+        employeeStatus: employmentStatus === 'ACTIVE' ? 'Aktif' : 'Tidak Aktif',
+        outlet: `Outlet Simulasi ${index % 4 + 1}`,
+        coverageArea: areas.find((area) => area.id === areaId)?.name ?? null,
+        academicScore: String(70 + index % 20),
+        personalityScore: String(75 + index % 15),
+        height: `${155 + index % 20} cm`,
+        weight: `${50 + index % 25} kg`,
+        noGlasses: 'Ya',
+        notColorBlind: 'Ya',
+        agreementTermination: index % 4 === 0 ? 'YA' : index % 5 === 0 ? null : 'TIDAK',
+        warningLetter: index % 6 === 0 ? 'SP1' : null,
+        companyName: 'PT Contoh Karya Nusantara (Dummy)',
+        tenureLabel: `${Math.max(1, 2026 - Number(joinDate.slice(0, 4)))} tahun (demo)`,
+      },
       createdBy: index === 12 ? 'user-bandung' : 'user-hr',
       validationStatus: validationStatus as Employee['validationStatus'],
       validatedBy: validationStatus === 'VALIDATED' ? 'user-hr' : null,
@@ -101,6 +135,8 @@ export const createInitialData = (): DemoData => {
   })
 
   return {
+    projects: projects.map((project) => ({ ...project })),
+    projectQuotas: projectQuotas.map((quota) => ({ ...quota })),
     permissionConfig: cloneDefaultPermissions(),
     validationPolicy: { ...defaultValidationPolicy },
     employees,

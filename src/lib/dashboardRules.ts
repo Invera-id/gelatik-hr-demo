@@ -36,7 +36,7 @@ export const selectDashboardData = (employees: Employee[], exits: EmployeeExit[]
     exits: selectedExits,
     needs: selectedNeeds,
     fulfilled,
-    open: selectedNeeds.filter((need) => need.status === 'OPEN'),
+    open: selectedNeeds.filter((need) => need.status === 'OPEN' || need.status === 'MATCHED'),
     overSla: selectedNeeds.filter((need) => need.status === 'OVER_TARGET'),
     movements: movements.filter((movement) => employeeIds.has(movement.employeeId) && movement.effectiveDate >= filters.dateFrom && movement.effectiveDate <= filters.dateTo),
     fulfillmentRate: selectedNeeds.length ? Math.round((fulfilled.length / selectedNeeds.length) * 100) : 0,

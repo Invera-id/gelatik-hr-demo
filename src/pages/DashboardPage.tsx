@@ -1,22 +1,23 @@
-import { Activity, BriefcaseBusiness, CalendarClock, CheckCircle2, Clock3, Gauge, UserMinus, Users, X } from 'lucide-react'
+import { Activity, CalendarClock, CheckCircle2, Clock3, Gauge, UserMinus, Users, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { PageHeader } from '../components/PageHeader'
 import { StatusBadge } from '../components/StatusBadge'
 import { replacementTone } from '../components/statusTones'
 import { allowedAreaIds } from '../config/access'
 import { useDemo } from '../context/DemoContext'
-import { areas, demoUsers, positions, projects } from '../data/demoData'
+import { areas, demoUsers, positions } from '../data/demoData'
 import { formatDate, replacementLabels } from '../lib/businessRules'
 import { selectDashboardData, type DashboardFilters } from '../lib/dashboardRules'
 import type { ReplacementNeed } from '../types'
 import { DEMO_TODAY, getContractReminders, type ContractReminderCategory } from '../lib/contractRules'
 import { terminology as term } from '../config/terminology'
 
-type DrillKey = 'ACTIVE' | 'EXITS' | 'NEEDS' | 'FULFILLED' | 'OPEN' | 'OVER_SLA' | 'CONTRACT' | null
+type DrillKey = 'ACTIVE' | 'EXITS' | 'FULFILLED' | 'OPEN' | 'OVER_SLA' | 'CONTRACT' | null
 
 export function DashboardPage() {
-  const { currentUser, employees, employeeExits, replacementNeeds, employeeMovements, permissionConfig } = useDemo()
+  const { currentUser, employees, employeeExits, replacementNeeds, employeeMovements, permissionConfig, projects } = useDemo()
   const user = currentUser ?? demoUsers[0]
   const allowedAreas = allowedAreaIds(user, permissionConfig)
   const lockedArea = allowedAreas?.length === 1 ? allowedAreas[0] : ''
@@ -28,10 +29,9 @@ export function DashboardPage() {
   const update = (key: keyof DashboardFilters, value: string) => setFilters((current) => ({ ...current, [key]: value, ...(key === 'areaId' ? { projectId: '' } : {}) }))
   const kpis: Array<{ key: DrillKey; label: string; value: string | number; note: string; tone: string; icon: typeof Users }> = [
     { key: 'ACTIVE', label: 'Active Employee', value: data.activeEmployees.length, note: 'Aktif dan tervalidasi', tone: 'positive', icon: Users },
-    { key: 'EXITS', label: `Validated ${term.employeeExit}`, value: data.exits.length, note: 'Turnover tervalidasi', tone: 'neutral', icon: UserMinus },
-    { key: 'NEEDS', label: `${term.replacementNeed}s`, value: data.needs.length, note: 'Dalam periode terpilih', tone: 'neutral', icon: BriefcaseBusiness },
+    { key: 'EXITS', label: term.turnover, value: data.exits.length, note: 'Exit tervalidasi', tone: 'neutral', icon: UserMinus },
     { key: 'FULFILLED', label: 'Fulfilled', value: data.fulfilled.length, note: `${data.fulfillmentRate}% completion rate`, tone: 'positive', icon: CheckCircle2 },
-    { key: 'OPEN', label: 'Open', value: data.open.length, note: 'Perlu kandidat', tone: 'warning', icon: Clock3 },
+    { key: 'OPEN', label: term.vacant, value: data.open.length, note: 'Belum terpenuhi', tone: 'warning', icon: Clock3 },
     { key: 'OVER_SLA', label: term.overSla, value: data.overSla.length, note: 'Lebih dari 3 hari kerja', tone: 'danger', icon: Gauge },
     { key: null, label: 'Fulfillment Rate', value: `${data.fulfillmentRate}%`, note: 'Completed / all needs', tone: 'positive', icon: Gauge },
     { key: null, label: 'Average Gap', value: `${data.averageGap.toFixed(1)} hari`, note: 'Working-day gap', tone: 'neutral', icon: Activity },
@@ -42,16 +42,17 @@ export function DashboardPage() {
   const turnoverProject = projects.filter((project) => chartAreas.some((area) => area.id === project.areaId)).map((project) => ({ name: project.name.replace('Project ', ''), exits: data.exits.filter((exit) => employees.find((employee) => employee.id === exit.employeeId)?.projectId === project.id).length, needs: 0, fulfilled: 0, gap: 0 }))
   const fulfillmentProject = projects.filter((project) => chartAreas.some((area) => area.id === project.areaId)).map((project) => ({ name: project.name.replace('Project ', ''), exits: 0, needs: data.needs.filter((need) => need.projectId === project.id).length, fulfilled: data.fulfilled.filter((need) => need.projectId === project.id).length, gap: 0 }))
   const gapArea = chartAreas.map((area) => { const values = data.fulfilled.filter((need) => need.areaId === area.id && need.gapWorkingDays !== null).map((need) => need.gapWorkingDays ?? 0); return { name: area.name, exits: 0, needs: 0, fulfilled: 0, gap: values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1)) : 0 } })
-  const drillNeeds: ReplacementNeed[] = drill === 'NEEDS' ? data.needs : drill === 'FULFILLED' ? data.fulfilled : drill === 'OPEN' ? data.open : drill === 'OVER_SLA' ? data.overSla : []
+  const drillNeeds: ReplacementNeed[] = drill === 'FULFILLED' ? data.fulfilled : drill === 'OPEN' ? data.open : drill === 'OVER_SLA' ? data.overSla : []
   const drillTitle = kpis.find((item) => item.key === drill)?.label ?? ''
   return <>
     <PageHeader eyebrow="WORKFORCE OVERVIEW" title={`Selamat datang, ${user.name.split(' ')[0]}`} description="Setiap KPI dapat dijelaskan hingga record sumbernya." />
     <section className="card dashboard-filters"><div><label>Periode mulai<input type="date" value={filters.dateFrom} onChange={(event) => update('dateFrom', event.target.value)} /></label><span className="date-separator">—</span><label>Sampai<input type="date" value={filters.dateTo} onChange={(event) => update('dateTo', event.target.value)} /></label></div><div><label>Area<select value={filters.areaId} disabled={Boolean(lockedArea)} onChange={(event) => update('areaId', event.target.value)}><option value="">Semua Area</option>{chartAreas.map((area) => <option value={area.id} key={area.id}>{area.name}</option>)}</select></label><label>Project<select value={filters.projectId} onChange={(event) => update('projectId', event.target.value)}><option value="">Semua Project</option>{projects.filter((project) => (!filters.areaId || project.areaId === filters.areaId) && chartAreas.some((area) => area.id === project.areaId)).map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label>Position<select value={filters.position} onChange={(event) => update('position', event.target.value)}><option value="">Semua Position</option>{positions.map((position) => <option key={position}>{position}</option>)}</select></label><label>Status<select value={filters.status} onChange={(event) => update('status', event.target.value)}><option value="">Semua Status</option>{Object.entries(replacementLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></div></section>
     <div className="kpi-grid">{kpis.map(({ key, label, value, note, tone, icon: Icon }) => <button type="button" className={`card kpi-card ${tone} ${key ? 'clickable' : ''}`} key={label} onClick={() => key && setDrill(key)}><div className="kpi-top"><span className="kpi-icon"><Icon /></span>{key && <small>Lihat data</small>}</div><strong>{value}</strong><h3>{label}</h3><p>{note}</p></button>)}</div>
+    <p className="target-fulfillment">Target Fulfillment: ≤ 3 working days <span>· Demo assumption</span> · <Link to="/projects">Project drill-down</Link> · <Link to="/reports/analytics">Monthly Summary</Link></p>
     <section className="card contract-reminder"><div className="chart-heading"><div><h2>Kontrak Mendekati Berakhir</h2><p>Informasi berdasarkan fixed demo date {formatDate(DEMO_TODAY)}.</p></div><span>INFORMATIONAL ONLY</span></div><div className="contract-categories">{(['D-30', 'D-14', 'D-7', 'EXPIRED'] as ContractReminderCategory[]).map((category) => <button key={category} onClick={() => setDrill('CONTRACT')}><span>{category === 'EXPIRED' ? 'Expired' : category}</span><strong>{contractReminders.filter((item) => item.category === category).length}</strong><small>{category === 'EXPIRED' ? 'Sudah berakhir' : 'Perlu perhatian'}</small></button>)}</div><div className="rule-note compact-note">Reminder notification eksternal merupakan pengembangan lanjutan.</div></section>
     <div className="charts-grid analytics-grid">{[
-      { title: 'Turnover by Area', note: 'Validated exit', data: turnoverArea, bars: [['exits', 'Employee Exit', '#173f5f']] },
-      { title: 'Turnover by Project', note: 'Validated exit per project', data: turnoverProject, bars: [['exits', 'Employee Exit', '#24587c']] },
+      { title: 'Turnover by Area', note: 'Validated exit', data: turnoverArea, bars: [['exits', 'Turnover', '#173f5f']] },
+      { title: 'Turnover by Project', note: 'Validated exit per project', data: turnoverProject, bars: [['exits', 'Turnover', '#24587c']] },
       { title: 'Fulfillment by Project', note: 'Needs vs completed', data: fulfillmentProject, bars: [['needs', 'Needs', '#b7c6d4'], ['fulfilled', 'Fulfilled', '#1a9b78']] },
       { title: 'Average Gap by Area', note: 'Working days', data: gapArea, bars: [['gap', 'Average Gap', '#f1a53a']] },
     ].map((chart) => <section className="card chart-card" key={chart.title}><div className="chart-heading"><div><h2>{chart.title}</h2><p>{chart.note}</p></div></div><div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><BarChart data={chart.data}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e8edf2" /><XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#667085', fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} /><Tooltip /><Legend />{chart.bars.map(([key, name, color]) => <Bar key={key} dataKey={key} name={name} fill={color} radius={[5, 5, 0, 0]} />)}</BarChart></ResponsiveContainer></div></section>)}</div>

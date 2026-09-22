@@ -3,13 +3,13 @@ import { useState, type FormEvent } from 'react'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
 import { useDemo } from '../context/DemoContext'
-import { areas, positions, projects } from '../data/demoData'
+import { areas, positions } from '../data/demoData'
 import { canAccessEmployee } from '../lib/businessRules'
 import { getEmployeeFlagWarning } from '../lib/employeeRules'
 
 export function ReentryPage() {
   const { employeeId } = useParams()
-  const { currentUser, employees, employeeFlags, permissionConfig, reentryEmployee } = useDemo()
+  const { currentUser, employees, projects, employeeFlags, permissionConfig, reentryEmployee } = useDemo()
   const navigate = useNavigate()
   const employee = employees.find((item) => item.id === employeeId)
   const warning = employee ? getEmployeeFlagWarning(employee.id, employeeFlags) : null
