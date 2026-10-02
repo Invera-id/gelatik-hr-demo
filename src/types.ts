@@ -76,6 +76,8 @@ export interface EmployeeProfile {
   bankAccountName?: string | null
   taxId?: string | null
   program?: string | null
+  clientName?: string | null
+  projectName?: string | null
   teamLeader?: string | null
   employeeStatus?: string | null
   outlet?: string | null

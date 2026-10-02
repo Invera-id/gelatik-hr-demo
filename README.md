@@ -62,7 +62,18 @@ Semua akun menggunakan password `password`.
 - Demo state memakai `localStorage`; sesi login memakai `sessionStorage`.
 - Menu profile menyediakan **Reset data demo** untuk mengembalikan employee, movement, exit, replacement, projects, quota, permission, policy, notes, flags, dan contract scenarios ke seed deterministik. Reset dianjurkan bila browser pernah dipakai untuk V2.
 - Export `.xlsx` diproses di browser; CSV menjadi fallback bila workbook gagal dibuat.
-- Import menerima `.xlsx` dan hanya field yang didokumentasikan. Duplicate Personnel ID harus dipilih **Skip** atau **Update current basic fields**; history tidak dihapus.
+
+## Import Excel Personil (83 kolom)
+
+Fitur impor penuh ada di menu **Import Excel** (role HR HO / Super Admin). Pilih satu file `.xlsx`; sistem otomatis membaca → menormalisasi → memvalidasi → menyimpan.
+
+- **Hanya sheet bernama `Database`** yang diproses (cocok persis setelah trim + normalisasi huruf). Sheet lain, termasuk `Database aktif`, diabaikan; tidak ada fallback ke sheet pertama. Jika tidak ada sheet `Database`, impor dibatalkan tanpa mengubah data.
+- Data impor disimpan **persisten di IndexedDB** (`gelatik-personnel-db`), bukan server dan bukan hanya state React — tetap ada setelah refresh/tutup browser. Daftar, detail, dan dashboard membaca sumber yang sama.
+- Impor ulang melakukan **dedup berdasarkan ID Personil**: ID baru → insert, ID berubah → update (nilai kosong tidak menghapus nilai lama), ID sama & tidak berubah → unchanged. Impor file identik tidak menggandakan data.
+- Baris tanpa identitas minimum (ID Personil + Nama) dan konflik NoKTP disimpan sebagai **exception**; field opsional bermasalah hanya menghasilkan **warning** (baris tetap tersimpan). Ringkasan + rincian masalah + unduhan laporan tersedia setelah impor.
+- Arsitektur berlapis & swappable: `src/lib/import/` (`columns`, `normalizers`, `workbook`, `mapping`, `parse`, `plan`, `repository`, `service`). Repository memakai interface `PersonnelRepository` sehingga backend API bisa menggantikan IndexedDB tanpa menulis ulang parser/UI.
+
+> Catatan: file contoh `Demo_Personil_3000_Baris-2.xlsx` memakai sheet bernama "Data Demo", sehingga perlu diubah menjadi `Database` dulu (salinan siap pakai `Demo_Personil_3000_Baris-Database.xlsx` sudah dibuat di folder Downloads). Download template ber-sheet `Database` tersedia di halaman Import.
 
 ## Vercel
 

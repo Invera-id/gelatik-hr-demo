@@ -219,7 +219,7 @@ td > small, td span + small, td strong + small { font-size: 12px; line-height: 1
 .import-upload > span { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 10px; color: #315f78; background: #edf4f7; }
 .import-upload h2 { color: #263b4b; font-size: 16px; }
 .import-upload p { color: #667085; font-size: 12px; margin-top: 4px; }
-.import-counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
+.import-counts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 14px; }
 .import-counts article { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 10px; padding: 15px; color: #16866a; }
 .import-counts article.warning { color: #b56b09; }
 .import-counts article.error { color: #b42318; }
@@ -230,6 +230,16 @@ td > small, td span + small, td strong + small { font-size: 12px; line-height: 1
 .import-confirm p { color: #667085; font-size: 12px; }
 .table-card td select { min-width: 150px; }
 .alert.error { color: #b42318; background: #fef3f2; border-color: #f4c7c3; margin-bottom: 14px; }
+.import-steps { display: flex; flex-wrap: wrap; gap: 10px; }
+.import-step { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: 999px; font-size: 13px; background: #f1f4f7; color: #90a0ad; border: 1px solid #e3e9ee; }
+.import-step.active { background: #edf4f7; color: #1d6a86; border-color: #bcd6e2; font-weight: 600; }
+.import-step.done { background: #ecfaf4; color: #16866a; border-color: #bfe8d8; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 8px; }
+.summary-grid > div { padding: 12px 14px; border: 1px solid #edf0f3; border-radius: 10px; }
+.summary-grid span { display: block; color: #667085; font-size: 12px; }
+.summary-grid strong { color: #263b4b; font-size: 20px; }
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 600px) {
   .import-upload { grid-template-columns: auto 1fr; }

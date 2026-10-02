@@ -1,9 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useMemo, useReducer, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { areas, createInitialData, demoUsers } from '../data/demoData'
 import { allowedAreaIds, canValidateTransaction, cloneDefaultPermissions, defaultValidationPolicy, hasPermission } from '../config/access'
 import { calculateWorkingDayGap, getCandidateEligibility, getFulfillmentBlockers, getGapStatus, hasCompleteSourceData } from '../lib/businessRules'
 import type { DemoData, DemoUser, Employee, EmployeeExit, EmployeeFlagStatus, EmployeeMovement, MovementEvent, Permission, PlacementChangeRequest, Project, ProjectQuota, ReplacementNeed, Role, ScopeType, TransactionType, ValidationStatus, ValidatorAuthority } from '../types'
+import { personnelRepository } from '../lib/import/repository'
+import { runImport, type ImportPhase, type ImportRunResult } from '../lib/import/service'
+import type { ImportBatch, ImportException, StoredPersonnel } from '../lib/import/types'
 
 const DATA_KEY = 'gelatik-demo-data-v2'
 const USER_KEY = 'gelatik-demo-user-v1'
@@ -232,6 +235,15 @@ interface DemoContextValue extends DemoData {
   setEmployeeFlag: (employeeId: string, status: EmployeeFlagStatus, reason: string, notes: string) => void
   reentryEmployee: (employeeId: string, areaId: string, projectId: string, position: string, joinDate: string, notes: string) => void
   importEmployees: (employees: Employee[]) => void
+  /** Imported personnel persisted in IndexedDB (source of truth for the Excel import feature). */
+  importedPersonnel: StoredPersonnel[]
+  importBatches: ImportBatch[]
+  importExceptions: ImportException[]
+  importStorageReady: boolean
+  importStorageError: string | null
+  canImportPersonnel: boolean
+  importPersonnelFile: (file: File, onProgress?: (phase: ImportPhase) => void) => Promise<ImportRunResult>
+  refreshPersonnel: () => Promise<void>
   saveProject: (project: Project) => void
   setProjectStatus: (projectId: string, status: Project['status']) => void
   saveProjectQuota: (quota: ProjectQuota) => void
@@ -252,8 +264,58 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     return areaIds === null || Boolean(areaId && areaIds.includes(areaId))
   }
 
+  // Imported personnel live in IndexedDB; they are hydrated here and merged into the
+  // single `employees` source every view reads, so list/detail/dashboard stay consistent.
+  const [importedPersonnel, setImportedPersonnel] = useState<StoredPersonnel[]>([])
+  const [importBatches, setImportBatches] = useState<ImportBatch[]>([])
+  const [importExceptions, setImportExceptions] = useState<ImportException[]>([])
+  const [importStorageReady, setImportStorageReady] = useState(false)
+  const [importStorageError, setImportStorageError] = useState<string | null>(null)
+
+  const refreshPersonnel = useCallback(async () => {
+    try {
+      const [personnel, batches, exceptions] = await Promise.all([
+        personnelRepository.getAllPersonnel(),
+        personnelRepository.getBatches(),
+        personnelRepository.getExceptions(),
+      ])
+      setImportedPersonnel(personnel)
+      setImportBatches(batches)
+      setImportExceptions(exceptions)
+      setImportStorageError(null)
+    } catch (error) {
+      setImportStorageError(error instanceof Error ? error.message : 'Penyimpanan lokal tidak tersedia.')
+    } finally {
+      setImportStorageReady(true)
+    }
+  }, [])
+
+  // Hydrate from IndexedDB on mount. State is set only after the async load resolves.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { void refreshPersonnel() }, [refreshPersonnel])
+
+  const canImportPersonnel = Boolean(currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && hasPermission(currentUser, state.permissionConfig, 'create_employee'))
+
+  const importPersonnelFile = useCallback(async (file: File, onProgress?: (phase: ImportPhase) => void): Promise<ImportRunResult> => {
+    if (!currentUser || !['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) || !hasPermission(currentUser, state.permissionConfig, 'create_employee')) {
+      return { ok: false, batch: null, summary: null, status: null, exceptions: [], error: 'Anda tidak memiliki izin untuk mengimpor personil.' }
+    }
+    const result = await runImport({ file, repository: personnelRepository, areas, projects: state.projects, createdBy: currentUser.id, onProgress })
+    if (result.ok) await refreshPersonnel()
+    return result
+  }, [currentUser, state.permissionConfig, state.projects, refreshPersonnel])
+
+  // Combined, de-duplicated by internal id (demo-edited seed overrides the stored copy).
+  const combinedEmployees = useMemo(() => {
+    const map = new Map<string, Employee>()
+    for (const personnel of importedPersonnel) map.set(personnel.employee.id, personnel.employee)
+    for (const employee of state.employees) map.set(employee.id, employee)
+    return [...map.values()]
+  }, [importedPersonnel, state.employees])
+
   const value: DemoContextValue = {
-    projects: state.projects, projectQuotas: state.projectQuotas, employees: state.employees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: state.employeeMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy, currentUser,
+    projects: state.projects, projectQuotas: state.projectQuotas, employees: combinedEmployees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: state.employeeMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy, currentUser,
+    importedPersonnel, importBatches, importExceptions, importStorageReady, importStorageError, canImportPersonnel, importPersonnelFile, refreshPersonnel,
     login: (email, password) => {
       const user = demoUsers.find((item) => item.email.toLowerCase() === email.toLowerCase().trim() && item.password === password)
       if (!user) return false
@@ -261,7 +323,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       return true
     },
     logout: () => dispatch({ type: 'LOGOUT' }),
-    resetDemo: () => dispatch({ type: 'RESET' }),
+    resetDemo: () => { dispatch({ type: 'RESET' }); void personnelRepository.clearAll().then(refreshPersonnel) },
     saveEmployee: (employee) => currentUser && canUseArea(employee.areaId) && hasPermission(currentUser, state.permissionConfig, state.employees.some((item) => item.id === employee.id) ? 'edit_employee' : 'create_employee') && dispatch({ type: 'SAVE_EMPLOYEE', employee }),
     saveExit: (exit) => currentUser && canUseArea(state.employees.find((item) => item.id === exit.employeeId)?.areaId ?? null) && hasPermission(currentUser, state.permissionConfig, 'create_exit') && dispatch({ type: 'SAVE_EXIT', exit }),
     setEmployeeValidation: (employeeId, status, note) => {
