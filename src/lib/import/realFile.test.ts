@@ -25,10 +25,16 @@ const readReal = async (): Promise<SheetTable[] | null> => {
 }
 
 describe('real 3000-row workbook', () => {
-  it('rejects the real file as-is because its sheet is not named Database', async () => {
+  it('only imports a sheet named exactly "Database"', async () => {
     const sheets = await readReal()
     if (!sheets) return
-    expect(() => parseWorkbook(sheets)).toThrow(/Sheet Database tidak ditemukan/)
+    // The file in ~/Downloads is user-controlled; assert the rule relative to its actual sheets.
+    const hasDatabase = sheets.some((s) => s.name.trim().toLowerCase() === 'database')
+    if (hasDatabase) {
+      expect(parseWorkbook(sheets).records.length).toBeGreaterThan(0)
+    } else {
+      expect(() => parseWorkbook(sheets)).toThrow(/Sheet Database tidak ditemukan/)
+    }
   })
 
   it('parses and plans ~3000 records quickly once the sheet is named Database', async () => {

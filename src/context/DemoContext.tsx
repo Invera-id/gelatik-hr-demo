@@ -7,6 +7,9 @@ import type { DemoData, DemoUser, Employee, EmployeeExit, EmployeeFlagStatus, Em
 import { personnelRepository } from '../lib/import/repository'
 import { runImport, type ImportPhase, type ImportRunResult } from '../lib/import/service'
 import type { ImportBatch, ImportException, StoredPersonnel } from '../lib/import/types'
+import { clearAll as clearNotifications, emit as emitNotifications, resolveByDedupePrefix } from '../lib/notifications/service'
+import * as notify from '../lib/notifications/events'
+import type { AccessContext } from '../lib/notifications/rules'
 
 const DATA_KEY = 'gelatik-demo-data-v2'
 const USER_KEY = 'gelatik-demo-user-v1'
@@ -22,9 +25,9 @@ export type DemoAction =
   | { type: 'SAVE_EMPLOYEE'; employee: Employee }
   | { type: 'SAVE_EXIT'; exit: EmployeeExit }
   | { type: 'SET_EMPLOYEE_VALIDATION'; employeeId: string; status: Extract<ValidationStatus, 'VALIDATED' | 'REVISION_REQUIRED'>; validatorId: string; note?: string }
-  | { type: 'SET_EXIT_VALIDATION'; exitId: string; status: Extract<ValidationStatus, 'VALIDATED' | 'REVISION_REQUIRED'>; validatorId: string; note?: string }
-  | { type: 'MATCH_CANDIDATE'; needId: string; employeeId: string }
-  | { type: 'FULFILL_NEED'; needId: string }
+  | { type: 'SET_EXIT_VALIDATION'; exitId: string; status: Extract<ValidationStatus, 'VALIDATED' | 'REVISION_REQUIRED'>; validatorId: string; note?: string; employee?: Employee }
+  | { type: 'MATCH_CANDIDATE'; needId: string; employeeId: string; candidate?: Employee }
+  | { type: 'FULFILL_NEED'; needId: string; candidate?: Employee }
   | { type: 'TOGGLE_PERMISSION'; role: Role; permission: Permission }
   | { type: 'SET_ROLE_SCOPE'; role: Role; scope: ScopeType; selectedAreaIds?: string[] }
   | { type: 'RESET_PERMISSIONS' }
@@ -33,7 +36,7 @@ export type DemoAction =
   | { type: 'SET_MOVEMENT_VALIDATION'; requestId: string; status: Extract<ValidationStatus, 'VALIDATED' | 'REVISION_REQUIRED'>; validatorId: string; note?: string }
   | { type: 'ADD_EMPLOYEE_NOTE'; employeeId: string; notes: string; userId: string }
   | { type: 'SET_EMPLOYEE_FLAG'; employeeId: string; status: EmployeeFlagStatus; reason: string; notes: string; userId: string }
-  | { type: 'REENTRY_EMPLOYEE'; employeeId: string; areaId: string; projectId: string; position: string; joinDate: string; notes: string; userId: string }
+  | { type: 'REENTRY_EMPLOYEE'; employeeId: string; areaId: string; projectId: string; position: string; joinDate: string; notes: string; userId: string; employee?: Employee }
   | { type: 'IMPORT_EMPLOYEES'; employees: Employee[] }
   | { type: 'SAVE_PROJECT'; project: Project }
   | { type: 'SET_PROJECT_STATUS'; projectId: string; status: Project['status'] }
@@ -104,7 +107,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
     case 'SET_EXIT_VALIDATION': {
       const target = state.employeeExits.find((item) => item.id === action.exitId)
       if (!target) return state
-      const employee = state.employees.find((item) => item.id === target.employeeId)
+      const employee = state.employees.find((item) => item.id === target.employeeId) ?? action.employee
       if (!employee) return state
       const now = new Date().toISOString()
       const employeeExits = state.employeeExits.map((item) => item.id === action.exitId ? { ...item, validationStatus: action.status, revisionNote: action.status === 'REVISION_REQUIRED' ? action.note?.trim() || 'Perlu koreksi sebelum validasi.' : null, validatedBy: action.validatorId, validatedAt: now, updatedAt: now } : item)
@@ -128,7 +131,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
     }
     case 'MATCH_CANDIDATE': {
       const need = state.replacementNeeds.find((item) => item.id === action.needId)
-      const employee = state.employees.find((item) => item.id === action.employeeId)
+      const employee = state.employees.find((item) => item.id === action.employeeId) ?? action.candidate
       if (!need || !employee || !getCandidateEligibility(need, employee, state.replacementNeeds).eligible) return state
       const now = new Date().toISOString()
       const replacementNeeds = state.replacementNeeds.map((item) => item.id === need.id ? { ...item, replacementEmployeeId: employee.id, status: 'MATCHED' as const, updatedAt: now } : item)
@@ -137,7 +140,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
     }
     case 'FULFILL_NEED': {
       const need = state.replacementNeeds.find((item) => item.id === action.needId)
-      const employee = state.employees.find((item) => item.id === need?.replacementEmployeeId)
+      const employee = state.employees.find((item) => item.id === need?.replacementEmployeeId) ?? action.candidate
       if (!need || !employee || getFulfillmentBlockers(employee, need, state.replacementNeeds).length || !employee.joinDate) return state
       const gap = calculateWorkingDayGap(need.exitDate, employee.joinDate)
       const now = new Date().toISOString()
@@ -184,7 +187,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
       return persist({ ...state, employeeFlags: [{ id: `flag-${Date.now()}`, employeeId: action.employeeId, status: action.status, reason: action.reason.trim(), notes: action.notes.trim(), createdBy: action.userId, createdAt: now }, ...state.employeeFlags] })
     }
     case 'REENTRY_EMPLOYEE': {
-      const target = state.employees.find((item) => item.id === action.employeeId)
+      const target = state.employees.find((item) => item.id === action.employeeId) ?? action.employee
       if (!target || target.employmentStatus !== 'INACTIVE') return state
       const now = new Date().toISOString()
       const employees = state.employees.map((item) => item.id === target.id ? { ...item, areaId: action.areaId, projectId: action.projectId, position: action.position, joinDate: action.joinDate, profile: { ...item.profile, areaCbs: areas.find((area) => area.id === action.areaId)?.name ?? null }, employmentStatus: 'ACTIVE' as const, validationStatus: 'VALIDATED' as const, validatedBy: action.userId, validatedAt: now, updatedAt: now } : item)
@@ -214,7 +217,7 @@ export const demoReducer = (state: DemoState, action: DemoAction): DemoState => 
   }
 }
 
-interface DemoContextValue extends DemoData {
+export interface DemoContextValue extends DemoData {
   currentUser: DemoUser | null
   login: (email: string, password: string) => boolean
   logout: () => void
@@ -298,10 +301,16 @@ export function DemoProvider({ children }: { children: ReactNode }) {
 
   const importPersonnelFile = useCallback(async (file: File, onProgress?: (phase: ImportPhase) => void): Promise<ImportRunResult> => {
     if (!currentUser || !['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) || !hasPermission(currentUser, state.permissionConfig, 'create_employee')) {
-      return { ok: false, batch: null, summary: null, status: null, exceptions: [], error: 'Anda tidak memiliki izin untuk mengimpor personil.' }
+      return { ok: false, batch: null, summary: null, status: null, exceptions: [], duplicates: [], error: 'Anda tidak memiliki izin untuk mengimpor personil.' }
     }
     const result = await runImport({ file, repository: personnelRepository, areas, projects: state.projects, createdBy: currentUser.id, onProgress })
-    if (result.ok) await refreshPersonnel()
+    // One summary notification per operation (not per row); failures notify the actor too.
+    if (result.ok && result.batch) {
+      emitNotifications(notify.buildImportSummary({ batch: result.batch, actor: currentUser, now: new Date().toISOString() }))
+      await refreshPersonnel()
+    } else if (!result.ok) {
+      emitNotifications(notify.buildImportFailure({ fileName: file.name, error: result.error ?? 'Impor gagal.', actor: currentUser, now: new Date().toISOString(), opId: `${file.name}-${Date.now()}` }))
+    }
     return result
   }, [currentUser, state.permissionConfig, state.projects, refreshPersonnel])
 
@@ -313,6 +322,19 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     return [...map.values()]
   }, [importedPersonnel, state.employees])
 
+  // Access context + helpers for business actions. Employee lookups use the combined
+  // source so actions (exit, movement, validation, notifications) also work for
+  // IndexedDB-backed imported personnel, not only the localStorage seed.
+  const accessCtx: AccessContext = { users: demoUsers, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy }
+  const nowIso = () => new Date().toISOString()
+  const areaNameOf = (areaId: string | null) => areas.find((area) => area.id === areaId)?.name ?? 'tidak diketahui'
+  const findEmployee = (id: string | null | undefined) => combinedEmployees.find((item) => item.id === id)
+  const isImported = (id: string) => importedPersonnel.some((personnel) => personnel.employee.id === id)
+  // Persist a status/placement change back to IndexedDB for imported personnel.
+  const writeThroughImported = (id: string, patch: Partial<Employee>) => {
+    if (isImported(id)) void personnelRepository.patchEmployee(id, patch).then(() => { void refreshPersonnel() })
+  }
+
   const value: DemoContextValue = {
     projects: state.projects, projectQuotas: state.projectQuotas, employees: combinedEmployees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: state.employeeMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy, currentUser,
     importedPersonnel, importBatches, importExceptions, importStorageReady, importStorageError, canImportPersonnel, importPersonnelFile, refreshPersonnel,
@@ -323,25 +345,93 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       return true
     },
     logout: () => dispatch({ type: 'LOGOUT' }),
-    resetDemo: () => { dispatch({ type: 'RESET' }); void personnelRepository.clearAll().then(refreshPersonnel) },
-    saveEmployee: (employee) => currentUser && canUseArea(employee.areaId) && hasPermission(currentUser, state.permissionConfig, state.employees.some((item) => item.id === employee.id) ? 'edit_employee' : 'create_employee') && dispatch({ type: 'SAVE_EMPLOYEE', employee }),
-    saveExit: (exit) => currentUser && canUseArea(state.employees.find((item) => item.id === exit.employeeId)?.areaId ?? null) && hasPermission(currentUser, state.permissionConfig, 'create_exit') && dispatch({ type: 'SAVE_EXIT', exit }),
-    setEmployeeValidation: (employeeId, status, note) => {
-      const transaction = state.employees.find((item) => item.id === employeeId)?.validationTransaction ?? 'EMPLOYEE_ENTRY'
-      if (currentUser && hasPermission(currentUser, state.permissionConfig, 'validate_employee') && canValidateTransaction(currentUser, transaction, state.validationPolicy)) dispatch({ type: 'SET_EMPLOYEE_VALIDATION', employeeId, status, validatorId: currentUser.id, note })
+    resetDemo: () => { dispatch({ type: 'RESET' }); clearNotifications(); void personnelRepository.clearAll().then(refreshPersonnel) },
+    saveEmployee: (employee) => {
+      if (!currentUser) return
+      const before = state.employees.find((item) => item.id === employee.id)
+      if (!(canUseArea(employee.areaId) && hasPermission(currentUser, state.permissionConfig, before ? 'edit_employee' : 'create_employee'))) return
+      dispatch({ type: 'SAVE_EMPLOYEE', employee })
+      if (employee.validationStatus === 'SUBMITTED' && before?.validationStatus !== 'SUBMITTED') {
+        emitNotifications(notify.buildEntrySubmission({ employee, actor: currentUser, areaName: areaNameOf(employee.areaId), ctx: accessCtx, now: nowIso() }))
+      }
     },
-    setExitValidation: (exitId, status, note) => currentUser && hasPermission(currentUser, state.permissionConfig, 'validate_exit') && canValidateTransaction(currentUser, 'EMPLOYEE_EXIT', state.validationPolicy) && dispatch({ type: 'SET_EXIT_VALIDATION', exitId, status, validatorId: currentUser.id, note }),
-    matchCandidate: (needId, employeeId) => currentUser && hasPermission(currentUser, state.permissionConfig, 'match_replacement') && dispatch({ type: 'MATCH_CANDIDATE', needId, employeeId }),
-    fulfillNeed: (needId) => currentUser && hasPermission(currentUser, state.permissionConfig, 'fulfill_replacement') && dispatch({ type: 'FULFILL_NEED', needId }),
+    saveExit: (exit) => {
+      const employee = findEmployee(exit.employeeId)
+      if (!currentUser || !employee || !(canUseArea(employee.areaId) && hasPermission(currentUser, state.permissionConfig, 'create_exit'))) return
+      const before = state.employeeExits.find((item) => item.id === exit.id)
+      dispatch({ type: 'SAVE_EXIT', exit })
+      if (exit.validationStatus === 'SUBMITTED' && before?.validationStatus !== 'SUBMITTED') {
+        emitNotifications(notify.buildExitSubmission({ exit, employee, actor: currentUser, areaName: areaNameOf(employee.areaId), ctx: accessCtx, now: nowIso() }))
+      }
+    },
+    setEmployeeValidation: (employeeId, status, note) => {
+      const employee = findEmployee(employeeId)
+      if (!employee) return
+      const transaction = employee.validationTransaction ?? 'EMPLOYEE_ENTRY'
+      if (!(currentUser && hasPermission(currentUser, state.permissionConfig, 'validate_employee') && canValidateTransaction(currentUser, transaction, state.validationPolicy))) return
+      dispatch({ type: 'SET_EMPLOYEE_VALIDATION', employeeId, status, validatorId: currentUser.id, note })
+      resolveByDedupePrefix(notify.entrySubmissionPrefix(employee))
+      emitNotifications(notify.buildEntryResult({ employee, validator: currentUser, status, revisionNote: note, ctx: accessCtx, now: nowIso() }))
+    },
+    setExitValidation: (exitId, status, note) => {
+      const exit = state.employeeExits.find((item) => item.id === exitId)
+      const employee = exit && findEmployee(exit.employeeId)
+      if (!exit || !employee || !(currentUser && hasPermission(currentUser, state.permissionConfig, 'validate_exit') && canValidateTransaction(currentUser, 'EMPLOYEE_EXIT', state.validationPolicy))) return
+      dispatch({ type: 'SET_EXIT_VALIDATION', exitId, status, validatorId: currentUser.id, note, employee })
+      if (status === 'VALIDATED') writeThroughImported(employee.id, { employmentStatus: 'INACTIVE' })
+      resolveByDedupePrefix(notify.exitSubmissionPrefix(exit))
+      emitNotifications(notify.buildExitResult({ exit: { ...exit, revisionNote: note ?? exit.revisionNote }, employee, validator: currentUser, status, ctx: accessCtx, now: nowIso() }))
+      if (status === 'VALIDATED' && exit.replacementRequired && !state.replacementNeeds.some((need) => need.employeeExitId === exit.id)) {
+        emitNotifications(notify.buildReplacementNeed({ need: { id: exit.id, areaId: employee.areaId } as never, employee, actor: currentUser, ctx: accessCtx, now: nowIso() }))
+      }
+    },
+    matchCandidate: (needId, employeeId) => {
+      const need = state.replacementNeeds.find((item) => item.id === needId)
+      const candidate = findEmployee(employeeId)
+      if (!need || !candidate || !(currentUser && hasPermission(currentUser, state.permissionConfig, 'match_replacement')) || !getCandidateEligibility(need, candidate, state.replacementNeeds).eligible) return
+      dispatch({ type: 'MATCH_CANDIDATE', needId, employeeId, candidate })
+      emitNotifications(notify.buildMatch({ need, candidate, actor: currentUser, ctx: accessCtx, now: nowIso() }))
+    },
+    fulfillNeed: (needId) => {
+      const need = state.replacementNeeds.find((item) => item.id === needId)
+      const candidate = findEmployee(need?.replacementEmployeeId)
+      if (!need || !candidate || !(currentUser && hasPermission(currentUser, state.permissionConfig, 'fulfill_replacement')) || getFulfillmentBlockers(candidate, need, state.replacementNeeds).length || !candidate.joinDate) return
+      dispatch({ type: 'FULFILL_NEED', needId, candidate })
+      resolveByDedupePrefix(`sla:${need.id}`)
+      const gap = calculateWorkingDayGap(need.exitDate, candidate.joinDate)
+      emitNotifications(notify.buildFulfill({ need: { ...need, gapWorkingDays: gap }, candidate, actor: currentUser, overSla: getGapStatus(gap) === 'OVER_TARGET', ctx: accessCtx, now: nowIso() }))
+    },
     togglePermission: (role, permission) => dispatch({ type: 'TOGGLE_PERMISSION', role, permission }),
     setRoleScope: (role, scope, selectedAreaIds) => dispatch({ type: 'SET_ROLE_SCOPE', role, scope, selectedAreaIds }),
     resetPermissions: () => dispatch({ type: 'RESET_PERMISSIONS' }),
     setValidationPolicy: (transaction, authority) => dispatch({ type: 'SET_VALIDATION_POLICY', transaction, authority }),
-    saveMovementRequest: (request) => currentUser && canUseArea(request.previousAreaId) && canUseArea(request.newAreaId) && hasPermission(currentUser, state.permissionConfig, 'edit_employee') && dispatch({ type: 'SAVE_MOVEMENT_REQUEST', request }),
-    setMovementValidation: (requestId, status, note) => currentUser && hasPermission(currentUser, state.permissionConfig, 'validate_employee') && canValidateTransaction(currentUser, 'EMPLOYEE_PLACEMENT_CHANGE', state.validationPolicy) && dispatch({ type: 'SET_MOVEMENT_VALIDATION', requestId, status, validatorId: currentUser.id, note }),
+    saveMovementRequest: (request) => {
+      const employee = findEmployee(request.employeeId)
+      if (!currentUser || !employee || !(canUseArea(request.previousAreaId) && canUseArea(request.newAreaId) && hasPermission(currentUser, state.permissionConfig, 'edit_employee'))) return
+      const before = state.movementRequests.find((item) => item.id === request.id)
+      dispatch({ type: 'SAVE_MOVEMENT_REQUEST', request })
+      if (request.validationStatus === 'SUBMITTED' && before?.validationStatus !== 'SUBMITTED') {
+        emitNotifications(notify.buildMovementSubmission({ request, employee, actor: currentUser, ctx: accessCtx, now: nowIso() }))
+      }
+    },
+    setMovementValidation: (requestId, status, note) => {
+      const request = state.movementRequests.find((item) => item.id === requestId)
+      const employee = request && findEmployee(request.employeeId)
+      if (!request || !employee || !(currentUser && hasPermission(currentUser, state.permissionConfig, 'validate_employee') && canValidateTransaction(currentUser, 'EMPLOYEE_PLACEMENT_CHANGE', state.validationPolicy))) return
+      dispatch({ type: 'SET_MOVEMENT_VALIDATION', requestId, status, validatorId: currentUser.id, note })
+      if (status === 'VALIDATED') writeThroughImported(employee.id, { areaId: request.newAreaId, projectId: request.newProjectId, position: request.newPosition })
+      resolveByDedupePrefix(notify.movementSubmissionPrefix(request))
+      emitNotifications(notify.buildMovementResult({ request: { ...request, revisionNote: note ?? request.revisionNote }, employee, validator: currentUser, status, ctx: accessCtx, now: nowIso() }))
+    },
     addEmployeeNote: (employeeId, notes) => currentUser && hasPermission(currentUser, state.permissionConfig, 'edit_employee') && dispatch({ type: 'ADD_EMPLOYEE_NOTE', employeeId, notes, userId: currentUser.id }),
     setEmployeeFlag: (employeeId, status, reason, notes) => currentUser && hasPermission(currentUser, state.permissionConfig, 'edit_employee') && dispatch({ type: 'SET_EMPLOYEE_FLAG', employeeId, status, reason, notes, userId: currentUser.id }),
-    reentryEmployee: (employeeId, areaId, projectId, position, joinDate, notes) => currentUser && canUseArea(areaId) && hasPermission(currentUser, state.permissionConfig, 'create_employee') && dispatch({ type: 'REENTRY_EMPLOYEE', employeeId, areaId, projectId, position, joinDate, notes, userId: currentUser.id }),
+    reentryEmployee: (employeeId, areaId, projectId, position, joinDate, notes) => {
+      const target = findEmployee(employeeId)
+      if (!currentUser || !target || target.employmentStatus !== 'INACTIVE' || !(canUseArea(areaId) && hasPermission(currentUser, state.permissionConfig, 'create_employee'))) return
+      dispatch({ type: 'REENTRY_EMPLOYEE', employeeId, areaId, projectId, position, joinDate, notes, userId: currentUser.id, employee: target })
+      writeThroughImported(employeeId, { employmentStatus: 'ACTIVE', areaId, projectId, position, joinDate })
+      emitNotifications(notify.buildReentry({ employee: { ...target, areaId }, actor: currentUser, ctx: accessCtx, now: nowIso() }))
+    },
     importEmployees: (employees) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && hasPermission(currentUser, state.permissionConfig, 'create_employee') && dispatch({ type: 'IMPORT_EMPLOYEES', employees }),
     saveProject: (project) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && dispatch({ type: 'SAVE_PROJECT', project }),
     setProjectStatus: (projectId, status) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && dispatch({ type: 'SET_PROJECT_STATUS', projectId, status }),

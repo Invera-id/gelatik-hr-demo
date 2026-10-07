@@ -1,5 +1,6 @@
 import { AlertTriangle, Check, ClipboardCheck, GitBranch, RotateCcw, UserMinus, UserPlus } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { EmptyState } from '../components/EmptyState'
 import { PageHeader } from '../components/PageHeader'
 import { StatusBadge } from '../components/StatusBadge'
@@ -12,9 +13,17 @@ import { canAccessEmployee } from '../lib/businessRules'
 
 export function ValidationPage() {
   const { currentUser, employees, projects, employeeExits, movementRequests, permissionConfig, validationPolicy, setEmployeeValidation, setExitValidation, setMovementValidation } = useDemo()
-  const [tab, setTab] = useState<'ENTRY' | 'EXIT'>('ENTRY')
+  const [searchParams] = useSearchParams()
+  const focusId = searchParams.get('focus')
   const pendingEntries = employees.filter((employee) => ['SUBMITTED', 'REVISION_REQUIRED'].includes(employee.validationStatus) && (!currentUser || canAccessEmployee(currentUser, employee, permissionConfig)))
   const pendingExits = employeeExits.filter((exit) => { const employee = employees.find((item) => item.id === exit.employeeId); return ['SUBMITTED', 'REVISION_REQUIRED'].includes(exit.validationStatus) && Boolean(employee && (!currentUser || canAccessEmployee(currentUser, employee, permissionConfig))) })
+  const focusInExit = Boolean(focusId && pendingExits.some((exit) => exit.employeeId === focusId))
+  const [tab, setTab] = useState<'ENTRY' | 'EXIT'>(focusInExit ? 'EXIT' : 'ENTRY')
+  useEffect(() => {
+    if (!focusId) return
+    const node = document.getElementById(`val-${focusId}`)
+    if (node) { node.scrollIntoView({ behavior: 'smooth', block: 'center' }); node.classList.add('val-focused') }
+  }, [focusId, tab])
   const pendingMovements = movementRequests.filter((request) => { const employee = employees.find((item) => item.id === request.employeeId); return ['SUBMITTED', 'REVISION_REQUIRED'].includes(request.validationStatus) && Boolean(employee && (!currentUser || canAccessEmployee(currentUser, employee, permissionConfig))) })
   const records = tab === 'ENTRY' ? pendingEntries : pendingExits
   const askRevisionNote = () => window.prompt('Catatan revisi (opsional):', '') ?? undefined
@@ -35,7 +44,7 @@ export function ValidationPage() {
           const area = areas.find((item) => item.id === employee.areaId)
           const project = projects.find((item) => item.id === employee.projectId)
           const submitter = demoUsers.find((item) => item.id === employee.createdBy)
-          return <article className="validation-item" key={employee.id}>
+          return <article className={`validation-item ${focusId === employee.id ? 'val-focused' : ''}`} id={`val-${employee.id}`} key={employee.id}>
             <div className="validation-type entry"><UserPlus /></div>
             <div className="validation-main"><div><span>EMPLOYEE ENTRY</span><h3>{employee.name}</h3><p>{employee.personnelId} · {area?.name ?? 'Area kosong'} · {project?.name ?? 'Project kosong'} · {employee.position ?? 'Posisi kosong'}</p></div><div className="validation-meta"><span>Dikirim oleh<strong>{submitter?.name ?? 'Demo User'}</strong></span><span>Tanggal submission<strong>{formatDate(employee.submittedAt, true)}</strong></span><StatusBadge tone={validationTone(employee.validationStatus)}>{validationLabels[employee.validationStatus]}</StatusBadge></div>{employee.revisionNote && <div className="inline-warning"><RotateCcw /> {employee.revisionNote}</div>}{!hasCompleteSourceData(employee) && <div className="inline-warning"><AlertTriangle /> Data source kritikal belum lengkap.</div>}</div>
             <div className="validation-actions"><button className="button success" disabled={!canValidateEntry(employee)} onClick={() => setEmployeeValidation(employee.id, 'VALIDATED')}><Check /> Validate</button><button className="button danger-outline" disabled={!canValidateEntry(employee)} onClick={() => setEmployeeValidation(employee.id, 'REVISION_REQUIRED', askRevisionNote())}><RotateCcw /> Request Revision</button></div>
@@ -46,7 +55,7 @@ export function ValidationPage() {
           const area = areas.find((item) => item.id === employee.areaId)
           const project = projects.find((item) => item.id === employee.projectId)
           const submitter = demoUsers.find((item) => item.id === exit.createdBy)
-          return <article className="validation-item" key={exit.id}>
+          return <article className={`validation-item ${focusId === exit.employeeId ? 'val-focused' : ''}`} id={`val-${exit.employeeId}`} key={exit.id}>
             <div className="validation-type exit"><UserMinus /></div>
             <div className="validation-main"><div><span>EMPLOYEE EXIT</span><h3>{employee.name}</h3><p>{area?.name ?? 'Area kosong'} · {project?.name ?? 'Project kosong'} · Exit {formatDate(exit.exitDate)}</p></div><div className="validation-meta"><span>Dikirim oleh<strong>{submitter?.name ?? 'Demo User'}</strong></span><span>Replacement<strong>{exit.replacementRequired ? 'Required' : 'Tidak diperlukan'}</strong></span><StatusBadge tone={validationTone(exit.validationStatus)}>{validationLabels[exit.validationStatus]}</StatusBadge></div>{exit.revisionNote && <div className="inline-warning"><RotateCcw /> {exit.revisionNote}</div>}{exit.replacementRequired && !hasCompleteSourceData(employee) && <div className="inline-warning"><AlertTriangle /> Replacement Need akan ditandai karena data sumber belum lengkap.</div>}</div>
             <div className="validation-actions"><button className="button success" disabled={!canValidateExit} onClick={() => setExitValidation(exit.id, 'VALIDATED')}><Check /> Validate</button><button className="button danger-outline" disabled={!canValidateExit} onClick={() => setExitValidation(exit.id, 'REVISION_REQUIRED', askRevisionNote())}><RotateCcw /> Request Revision</button></div>

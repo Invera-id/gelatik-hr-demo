@@ -17,6 +17,7 @@ import { EmployeeMovementPage } from './pages/EmployeeMovementPage'
 import { ReentryPage } from './pages/ReentryPage'
 import { ExportPage } from './pages/ExportPage'
 import { ImportPage } from './pages/ImportPage'
+import { NotificationsPage } from './pages/NotificationsPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
@@ -66,6 +67,7 @@ export default function App() {
       <Route path="replacements/:needId" element={<PermissionRoute permission="view_replacement"><ReplacementDetailPage /></PermissionRoute>} />
       <Route path="reports/export" element={<PermissionRoute permission="export_data"><ExportPage /></PermissionRoute>} />
       <Route path="import" element={<ImportRoute><ImportPage /></ImportRoute>} />
+      <Route path="notifications" element={<NotificationsPage />} />
       <Route path="settings/access" element={<SuperAdminRoute><AccessSettingsPage /></SuperAdminRoute>} />
       <Route path="settings/validation" element={<SuperAdminRoute><AccessSettingsPage mode="validation" /></SuperAdminRoute>} />
     </Route>

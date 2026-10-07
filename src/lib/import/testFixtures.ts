@@ -72,6 +72,15 @@ export class InMemoryPersonnelRepository implements PersonnelRepository {
     for (const record of records) this.personnel.set(record.businessKey, record)
     this.seeded = true
   }
+  async patchEmployee(employeeId: string, patch: Partial<StoredPersonnel['employee']>): Promise<boolean> {
+    for (const [key, record] of this.personnel) {
+      if (record.employee.id === employeeId) {
+        this.personnel.set(key, { ...record, employee: { ...record.employee, ...patch } })
+        return true
+      }
+    }
+    return false
+  }
   async clearAll(): Promise<void> {
     this.personnel.clear()
     this.batches = []

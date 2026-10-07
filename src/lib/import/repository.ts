@@ -17,6 +17,8 @@ export interface PersonnelRepository {
   isSeeded(): Promise<boolean>
   markSeeded(): Promise<void>
   seedPersonnel(records: StoredPersonnel[]): Promise<void>
+  /** Apply a partial update to the stored employee with this internal id (no-op if absent). */
+  patchEmployee(employeeId: string, patch: Partial<StoredPersonnel['employee']>): Promise<boolean>
   clearAll(): Promise<void>
 }
 
@@ -136,6 +138,28 @@ export class IndexedDbPersonnelRepository implements PersonnelRepository {
       const personnel = tx.objectStore(STORE_PERSONNEL)
       for (const record of records) personnel.put(record)
       tx.objectStore(STORE_META).put({ key: META_SEEDED, value: true })
+    })
+  }
+
+  async patchEmployee(employeeId: string, patch: Partial<StoredPersonnel['employee']>): Promise<boolean> {
+    const db = await this.open()
+    return new Promise<boolean>((resolve, reject) => {
+      const tx = db.transaction(STORE_PERSONNEL, 'readwrite')
+      const store = tx.objectStore(STORE_PERSONNEL)
+      const request = store.getAll() as IDBRequest<StoredPersonnel[]>
+      let found = false
+      request.onsuccess = () => {
+        const target = request.result.find((item) => item.employee.id === employeeId)
+        if (target) {
+          found = true
+          const now = new Date().toISOString()
+          store.put({ ...target, employee: { ...target.employee, ...patch, updatedAt: now }, updatedAt: now })
+        }
+      }
+      request.onerror = () => reject(request.error)
+      tx.oncomplete = () => resolve(found)
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
     })
   }
 

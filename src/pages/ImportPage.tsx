@@ -75,9 +75,14 @@ export function ImportPage() {
     }
   }
 
+  const duplicates = result?.ok ? result.duplicates : []
+  const duplicateReason = (personnelId: string, duplicateRows: number[], keptRow: number) =>
+    `ID ${personnelId} berulang pada baris ${duplicateRows.join(', ')} — digabung ke baris ${keptRow} (nilai terisi terakhir menang).`
+
   const downloadIssues = () => {
     const rows: ExportValue[][] = [
       ...exceptions.map((e) => [e.rowNumber, '-', 'EXCEPTION', e.reason, Object.entries(e.rawValues).slice(0, 3).map(([k, v]) => `${k}=${v}`).join('; ')]),
+      ...duplicates.map((d) => [d.keptRow, 'ID Personil', 'DUPLIKAT', duplicateReason(d.personnelId, d.duplicateRows, d.keptRow), d.personnelId]),
       ...warnings.map((w) => [w.rowNumber, w.column, 'WARNING', w.reason, w.rawValue ?? '']),
     ].sort((a, b) => Number(a[0]) - Number(b[0]))
     exportBusinessTable({ headers: ['Baris Excel', 'Kolom', 'Jenis', 'Alasan', 'Nilai Sumber'], rows }, `laporan-masalah-import-${batchId}.csv`)
@@ -87,6 +92,7 @@ export function ImportPage() {
   const statusMeta = result?.ok && result.status ? STATUS_META[result.status] : null
   const issueRows = [
     ...exceptions.map((e) => ({ key: `e-${e.id}`, rowNumber: e.rowNumber, column: '—', type: 'EXCEPTION' as const, reason: e.reason })),
+    ...duplicates.map((d) => ({ key: `d-${d.personnelId}-${d.keptRow}`, rowNumber: d.keptRow, column: 'ID Personil', type: 'DUPLIKAT' as const, reason: duplicateReason(d.personnelId, d.duplicateRows, d.keptRow) })),
     ...warnings.map((w, i) => ({ key: `w-${i}`, rowNumber: w.rowNumber, column: w.column, type: 'WARNING' as const, reason: w.reason })),
   ].sort((a, b) => a.rowNumber - b.rowNumber)
 
@@ -99,7 +105,8 @@ export function ImportPage() {
     />
 
     <div className="rule-note">
-      <strong>Penyimpanan lokal</strong> Data impor disimpan di browser/perangkat ini (IndexedDB) dan tetap ada setelah refresh — bukan di server. Hanya sheet bernama <strong>Database</strong> yang diproses; sheet lain (termasuk <em>Database aktif</em>) diabaikan.
+      <strong>Penyimpanan lokal</strong>
+      <span>Data impor disimpan di browser/perangkat ini (IndexedDB) dan tetap ada setelah refresh — bukan di server. Hanya sheet bernama <b>Database</b> yang diproses; sheet lain (termasuk <em>Database aktif</em>) diabaikan.</span>
     </div>
 
     {importStorageReady && importStorageError && (
@@ -188,7 +195,7 @@ export function ImportPage() {
                     <tr key={row.key}>
                       <td>{row.rowNumber}</td>
                       <td>{row.column}</td>
-                      <td><StatusBadge tone={row.type === 'EXCEPTION' ? 'danger' : 'warning'}>{row.type === 'EXCEPTION' ? 'Perlu diperbaiki' : 'Peringatan'}</StatusBadge></td>
+                      <td><StatusBadge tone={row.type === 'EXCEPTION' ? 'danger' : row.type === 'DUPLIKAT' ? 'info' : 'warning'}>{row.type === 'EXCEPTION' ? 'Perlu diperbaiki' : row.type === 'DUPLIKAT' ? 'Duplikat' : 'Peringatan'}</StatusBadge></td>
                       <td>{row.reason}</td>
                     </tr>
                   ))}
