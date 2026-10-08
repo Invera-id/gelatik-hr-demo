@@ -325,7 +325,30 @@ export const buildImportSummary = (p: { batch: ImportBatch; actor: DemoUser; now
     title: failed ? 'Impor Excel gagal' : withIssues ? 'Impor Excel selesai dengan catatan' : 'Impor Excel berhasil',
     message: failed
       ? `Impor ${p.batch.fileName} gagal; tidak ada perubahan data.`
-      : `${p.batch.fileName}: ${s.added} ditambahkan, ${s.updated} diperbarui, ${s.exceptionRows} perlu diperbaiki, ${s.warningRows} peringatan.`,
+      : `${p.batch.fileName}: ${s.newMasters} personil baru, ${s.newSourceRecords} catatan riwayat, ${s.pendingReviewItems} perlu ditinjau, ${s.confirmedEvents} kejadian terkonfirmasi${s.exceptionRows ? `, ${s.exceptionRows} perlu diperbaiki` : ''}. (Jumlah baris ≠ jumlah personil.)`,
+    actorUserId: p.actor.id,
+    entityType: 'import',
+    entityId: p.batch.id,
+    areaId: null,
+    target: { kind: 'route', route: '/import' },
+  }, p.now)
+}
+
+/**
+ * One "history needs review" notice per import batch (NOT one per row), sent to the
+ * importer (an authorized HR_HO / Super Admin). Only emitted when the run produced
+ * ambiguous history. Distinct from confirmed movement/exit notifications.
+ */
+export const buildReviewNeeded = (p: { batch: ImportBatch; actor: DemoUser; now: string }): NotificationRecord[] => {
+  const s = p.batch.summary
+  if (s.pendingReviewItems <= 0) return []
+  return build({
+    dedupeBase: `import-review:${p.batch.id}`,
+    recipientIds: [p.actor.id],
+    category: 'IMPORT',
+    severity: 'warning',
+    title: 'Data riwayat perlu ditinjau',
+    message: `${p.batch.fileName}: ${s.pendingReviewItems} catatan riwayat personil perlu ditinjau (kandidat mutasi/exit/konflik). Belum ada perubahan status yang dikonfirmasi.`,
     actorUserId: p.actor.id,
     entityType: 'import',
     entityId: p.batch.id,

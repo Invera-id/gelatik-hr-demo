@@ -1,6 +1,6 @@
 import { addDays, format, isAfter, isBefore, isWeekend, parseISO } from 'date-fns'
 import type { DemoUser, Employee, ReplacementNeed, Role, RolePermissionConfig } from '../types'
-import { allowedAreaIds } from '../config/access'
+import { allowedAreaIds, hasPermission } from '../config/access'
 
 export const roleLabels: Record<Role, string> = {
   AREA_SUPPORT: 'Area Supporting / Data Input',
@@ -25,6 +25,30 @@ export const contractLabels = {
 export const canEditEmployees = (user: DemoUser) => !['MANAGEMENT', 'OPERATIONS_MANAGER'].includes(user.role)
 export const canValidate = (user: DemoUser) => ['HR_HO', 'SUPER_ADMIN'].includes(user.role)
 export const canViewValidation = canValidate
+
+/** A person counts as active workforce only when their current condition is confirmed. */
+export const isCountableActive = (employee: Pick<Employee, 'employmentStatus' | 'conditionStatus'>) =>
+  employee.employmentStatus === 'ACTIVE' && employee.conditionStatus !== 'NEEDS_REVIEW'
+
+/** Whether the person's current condition still needs review (undetermined by import). */
+export const conditionNeedsReview = (employee: Pick<Employee, 'conditionStatus'>) =>
+  employee.conditionStatus === 'NEEDS_REVIEW'
+
+/**
+ * Who may act on an import review item: HR HO / Super Admin, within their allowed
+ * area scope. Items with an unknown area are only actionable by all-area reviewers.
+ */
+export const canReviewImportItem = (
+  user: DemoUser,
+  config: RolePermissionConfig[],
+  item: { areaId: string | null },
+): boolean => {
+  if (!['HR_HO', 'SUPER_ADMIN'].includes(user.role)) return false
+  if (!hasPermission(user, config, 'edit_employee')) return false
+  const areaIds = allowedAreaIds(user, config)
+  if (areaIds === null) return true
+  return Boolean(item.areaId && areaIds.includes(item.areaId))
+}
 
 export const canAccessEmployee = (user: DemoUser, employee: Employee, config?: RolePermissionConfig[]) => {
   if (!config) return user.role !== 'AREA_SUPPORT' || employee.areaId === user.areaId
@@ -52,6 +76,7 @@ export const getCandidateEligibility = (need: ReplacementNeed, candidate: Employ
   if (candidate.position !== need.position) reasons.push('Posisi tidak sesuai')
   if (candidate.id === need.originalEmployeeId) reasons.push('Karyawan asal tidak dapat menjadi pengganti')
   if (candidate.employmentStatus !== 'ACTIVE') reasons.push('Karyawan tidak aktif')
+  if (candidate.conditionStatus === 'NEEDS_REVIEW') reasons.push('Kondisi terkini belum ditinjau')
   if (needs.some((item) => item.id !== need.id && item.replacementEmployeeId === candidate.id && ['OPEN', 'MATCHED'].includes(item.status))) reasons.push('Karyawan sudah dialokasikan pada kebutuhan aktif lain')
   return { eligible: reasons.length === 0, reasons }
 }

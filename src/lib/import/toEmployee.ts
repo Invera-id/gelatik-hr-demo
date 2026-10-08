@@ -1,7 +1,7 @@
 import type { Area, Employee, EmployeeProfile, Project } from '../../types'
 import { EMPLOYEE_FIELD_KEYS } from './mapping'
 import type { PersonnelStructured, StoredPersonnel } from './types'
-import type { ParsedRecord } from './parse'
+import type { ParsedSourceRecord } from './parse'
 
 export interface BuildContext {
   areas: Area[]
@@ -38,6 +38,8 @@ export interface EmployeeIdentity {
   updatedAt: string
   validatedBy: string | null
   validatedAt: string | null
+  /** Whether the current condition is confirmed; NEEDS_REVIEW keeps the person out of active counts. */
+  conditionStatus?: 'CONFIRMED' | 'NEEDS_REVIEW'
 }
 
 /**
@@ -64,6 +66,7 @@ export const buildEmployee = (
     projectId,
     position: fields.position ?? null,
     employmentStatus: exitDate ? 'INACTIVE' : 'ACTIVE',
+    conditionStatus: identity.conditionStatus ?? 'CONFIRMED',
     joinDate: fields.joinDate ?? null,
     contractStartDate: fields.contractStartDate ?? fields.joinDate ?? null,
     contractEndDate,
@@ -88,10 +91,12 @@ export interface ToStoredOptions {
   createdBy: string
   now: string
   context: BuildContext
+  /** CONFIRMED (single clean/auto-confirmed) or NEEDS_REVIEW (only ambiguous records). */
+  conditionStatus?: 'CONFIRMED' | 'NEEDS_REVIEW'
 }
 
-/** Build a brand-new StoredPersonnel from a freshly parsed record. */
-export const toStoredPersonnel = (record: ParsedRecord, options: ToStoredOptions): StoredPersonnel => {
+/** Build a brand-new StoredPersonnel master from the chosen representative source record. */
+export const toStoredPersonnel = (record: ParsedSourceRecord, options: ToStoredOptions): StoredPersonnel => {
   const employee = buildEmployee(record.fields, {
     id: `personnel-${record.businessKey}`,
     createdBy: options.createdBy,
@@ -99,6 +104,7 @@ export const toStoredPersonnel = (record: ParsedRecord, options: ToStoredOptions
     updatedAt: options.now,
     validatedBy: options.createdBy,
     validatedAt: options.now,
+    conditionStatus: options.conditionStatus ?? 'CONFIRMED',
   }, options.context)
   return {
     businessKey: record.businessKey,
@@ -107,7 +113,7 @@ export const toStoredPersonnel = (record: ParsedRecord, options: ToStoredOptions
     structured: record.structured,
     warnings: record.warnings,
     sourceRowNumber: record.rowNumber,
-    duplicateInFileCount: record.duplicateInFileCount,
+    sourceFingerprint: record.fingerprint,
     fileName: options.fileName,
     sheetName: options.sheetName,
     batchId: options.batchId,

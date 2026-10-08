@@ -20,3 +20,25 @@
 - Import report now lists which rows were duplicates (merged) in addition to warnings/exceptions, with a downloadable issue report.
 - Fix: exit/movement/validation/notifications now work for IndexedDB-backed imported personnel (actions look up the combined source and write status changes back to IndexedDB).
 - Limitation: frontend-only — no cross-device delivery or guaranteed background delivery; different demo users in the same browser each have their own inbox.
+
+## Import history & reconciliation (frontend-only)
+
+- The importer no longer collapses same-ID rows with "last row wins". Each distinct
+  source row is kept as a `SourceImportRecord` (keyed `${businessKey}:${fingerprint}`),
+  grouped by normalized ID, then **classified**: identical duplicate vs profile
+  variation vs placement change vs exit vs re-entry vs identity conflict vs
+  undetermined. See `docs/IMPORT_RULES.md` for the full rule set.
+- Ambiguous groups become **pending `ReviewItem`s** (review queue on the Import page);
+  nothing changes employment status, and no exit/replacement/"mutasi berhasil" is
+  fabricated. Only a clear source-supported placement change (one row carrying the
+  mutation date) auto-confirms.
+- A new `Employee.conditionStatus` (`CONFIRMED` | `NEEDS_REVIEW`, default CONFIRMED)
+  keeps undetermined personnel out of active-workforce / eligibility / fulfillment
+  counts and shows a "Perlu ditinjau" badge until a reviewer confirms.
+- Confirmed events (auto or via review) are derived into the existing career timeline
+  as a VIEW over IndexedDB review decisions (deterministic ids → idempotent; no
+  cross-store transaction). Pending items show in a separate "Riwayat impor perlu
+  ditinjau" section. Review is limited to HR HO / Super Admin within area scope.
+- IndexedDB migrated v1 → v2 (adds `sourceRecords` + `reviewItems`, old data kept).
+- Modules: `src/lib/import/{fingerprint,classify,reconcile,derivedEvents}.ts`,
+  component `ImportReviewQueue`. 170 tests incl. the 20 mandatory scenarios.

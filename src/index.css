@@ -236,6 +236,33 @@ td > small, td span + small, td strong + small { font-size: 12px; line-height: 1
 .summary-grid > div { padding: 12px 14px; border: 1px solid #edf0f3; border-radius: 10px; }
 .summary-grid span { display: block; color: #667085; font-size: 12px; }
 .summary-grid strong { color: #263b4b; font-size: 20px; }
+
+/* Import review queue (§8) */
+.review-queue { display: flex; flex-direction: column; gap: 14px; margin-top: 14px; }
+.review-item { padding: 18px; }
+.review-item-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.review-item-head strong { color: #263b4b; font-size: 15px; }
+.review-pid { margin-left: 8px; color: #8a97a3; font-size: 12px; font-family: ui-monospace, monospace; }
+.review-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.review-count { color: #667085; font-size: 12px; }
+.review-reason { display: flex; align-items: center; gap: 6px; color: #80540e; font-size: 12px; margin: 10px 0 4px; }
+.review-candidate { color: #4a5a67; font-size: 12px; margin-bottom: 10px; }
+.review-compare { width: 100%; border-collapse: collapse; font-size: 12px; }
+.review-compare th, .review-compare td { border: 1px solid #edf0f3; padding: 6px 9px; text-align: left; vertical-align: top; }
+.review-compare th { background: #f7f9fb; color: #4a5a67; font-weight: 600; }
+.review-compare tr.differs td { background: #fff7e7; }
+.review-compare tr.differs td:first-child { color: #80540e; font-weight: 600; }
+.review-dates { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0; color: #667085; font-size: 12px; }
+.review-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; padding-top: 12px; border-top: 1px solid #edf0f3; }
+.review-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #4a5a67; }
+.review-form select, .review-form input { padding: 7px 9px; border: 1px solid #cdd7df; border-radius: 8px; font-size: 13px; min-width: 150px; }
+.review-form .review-note { flex: 1 1 200px; }
+.review-form .review-note input { width: 100%; }
+.pending-review-list { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.pending-review-row { padding: 12px 14px; border: 1px solid #f0dba8; background: #fffaf0; border-radius: 9px; }
+.pending-review-row p { color: #4a5a67; font-size: 12px; margin: 6px 0 4px; }
+.pending-review-row small { color: #8a97a3; font-size: 11px; }
+
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 

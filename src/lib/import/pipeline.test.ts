@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import { parseWorkbook } from './parse'
-import { planImport } from './plan'
 import { runImport } from './service'
 import { selectDatabaseSheet } from './workbook'
 import { ImportAbortError } from './types'
@@ -11,16 +10,6 @@ import {
   testProjects,
 } from './testFixtures'
 import type { SheetTable } from './workbook'
-
-const planOptions = (batchId = 'batch-1') => ({
-  batchId,
-  fileName: 'test.xlsx',
-  sheetName: 'Database',
-  createdBy: 'user-hr',
-  now: '2026-10-02T00:00:00.000Z',
-  areas: testAreas,
-  projects: testProjects,
-})
 
 const personRow = (overrides: Record<string, unknown> = {}) => ({
   personnelId: 'ID-001',
@@ -171,82 +160,38 @@ describe('validation & exceptions', () => {
     expect(parsed.blankRowsSkipped).toBe(1)
   })
 
-  it('records in-file NoKTP conflict as an exception, keeps the first valid record', () => {
-    const parsed = parseWorkbook([buildSheet('Database', [
-      personRow({ personnelId: 'ID-DUP', nationalId: '1111111111111111' }),
-      personRow({ personnelId: 'ID-DUP', nationalId: '2222222222222222' }),
-    ])])
-    expect(parsed.records).toHaveLength(1)
-    expect(parsed.records[0].fields.nationalId).toBe('1111111111111111')
-    expect(parsed.exceptions.some((e) => /Konflik identitas/.test(e.reason))).toBe(true)
-  })
-
-  it('merges in-file duplicates (same ID) with last non-empty value winning', () => {
+  it('keeps distinct same-ID rows as separate source records (no last-wins merge)', () => {
     const parsed = parseWorkbook([buildSheet('Database', [
       personRow({ personnelId: 'ID-DUP', position: 'SALES', outlet: 'A' }),
       personRow({ personnelId: 'ID-DUP', position: 'TEAM LEADER', outlet: '' }),
     ])])
+    // Both rows are preserved as history; nothing is merged or dropped.
+    expect(parsed.records).toHaveLength(2)
+    expect(parsed.groups.get('ID-DUP')).toHaveLength(2)
+    expect(parsed.records.map((r) => r.fields.position).sort()).toEqual(['SALES', 'TEAM LEADER'])
+    expect(parsed.exceptions).toHaveLength(0)
+  })
+
+  it('collapses byte-identical same-ID rows (idempotent), counting the duplicate', () => {
+    const parsed = parseWorkbook([buildSheet('Database', [
+      personRow({ personnelId: 'ID-DUP', position: 'SALES' }),
+      personRow({ personnelId: 'ID-DUP', position: 'SALES' }),
+    ])])
     expect(parsed.records).toHaveLength(1)
-    expect(parsed.records[0].fields.position).toBe('TEAM LEADER')
-    expect(parsed.records[0].fields.outlet).toBe('A') // empty did not erase
-    expect(parsed.records[0].duplicateInFileCount).toBe(1)
-    expect(parsed.duplicatesInFile).toBe(1)
+    expect(parsed.identicalDuplicatesInFile).toBe(1)
+  })
+
+  it('keeps same-ID rows with different complete NoKTP as distinct records (conflict handled later)', () => {
+    const parsed = parseWorkbook([buildSheet('Database', [
+      personRow({ personnelId: 'ID-DUP', nationalId: '1111111111111111' }),
+      personRow({ personnelId: 'ID-DUP', nationalId: '2222222222222222' }),
+    ])])
+    expect(parsed.records).toHaveLength(2)
+    expect(parsed.exceptions).toHaveLength(0) // no longer a parse-time exception
   })
 })
 
-describe('import planning (re-import & dedup)', () => {
-  it('inserts new personnel', () => {
-    const parsed = parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1' })])])
-    const plan = planImport([], parsed, planOptions())
-    expect(plan.summary.added).toBe(1)
-    expect(plan.summary.updated).toBe(0)
-    expect(plan.toPut).toHaveLength(1)
-  })
-
-  it('re-importing the identical file adds nothing and updates nothing', () => {
-    const parsed = parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1' })])])
-    const first = planImport([], parsed, planOptions('b1'))
-    const parsed2 = parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1' })])])
-    const second = planImport(first.toPut, parsed2, planOptions('b2'))
-    expect(second.summary.added).toBe(0)
-    expect(second.summary.unchanged).toBe(1)
-    expect(second.toPut).toHaveLength(0)
-  })
-
-  it('updates an existing ID when data changes', () => {
-    const first = planImport([], parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1', position: 'SALES' })])]), planOptions('b1'))
-    const second = planImport(first.toPut, parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1', position: 'TEAM LEADER' })])]), planOptions('b2'))
-    expect(second.summary.updated).toBe(1)
-    expect(second.toPut[0].employee.position).toBe('TEAM LEADER')
-  })
-
-  it('does not erase an existing value with an empty incoming value', () => {
-    const first = planImport([], parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1', outlet: 'OUTLET-A' })])]), planOptions('b1'))
-    const second = planImport(first.toPut, parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1', outlet: '', position: 'NEW POS' })])]), planOptions('b2'))
-    const stored = second.toPut[0] ?? first.toPut[0]
-    expect(stored.employee.profile?.outlet).toBe('OUTLET-A')
-    expect(stored.employee.position).toBe('NEW POS')
-  })
-
-  it('leaves personnel absent from the new file untouched (no replace-all)', () => {
-    const first = planImport([], parseWorkbook([buildSheet('Database', [
-      personRow({ personnelId: 'ID-1' }), personRow({ personnelId: 'ID-2' }),
-    ])]), planOptions('b1'))
-    const second = planImport(first.toPut, parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1', position: 'CHANGED' })])]), planOptions('b2'))
-    expect(second.summary.added).toBe(0)
-    // ID-2 is not in the plan's toPut but also not removed from the store.
-    expect(first.toPut.some((p) => p.businessKey === 'ID-2')).toBe(true)
-  })
-
-  it('preserves createdAt and internal id across updates', () => {
-    const first = planImport([], parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1', position: 'A' })])]), planOptions('b1'))
-    const original = first.toPut[0]
-    const second = planImport(first.toPut, parseWorkbook([buildSheet('Database', [personRow({ personnelId: 'ID-1', position: 'B' })])]), { ...planOptions('b2'), now: '2027-01-01T00:00:00.000Z' })
-    expect(second.toPut[0].employee.id).toBe(original.employee.id)
-    expect(second.toPut[0].createdAt).toBe(original.createdAt)
-    expect(second.toPut[0].updatedAt).toBe('2027-01-01T00:00:00.000Z')
-  })
-})
+// Reconciliation / re-import semantics are covered in reconcile.test.ts.
 
 describe('runImport service', () => {
   const fakeFile = (name = 'test.xlsx') => ({ name, size: 1000 }) as File
@@ -259,7 +204,7 @@ describe('runImport service', () => {
       createdBy: 'user-hr', readWorkbook: async () => sheets,
     })
     expect(result.ok).toBe(true)
-    expect(result.summary?.added).toBe(2)
+    expect(result.summary?.newMasters).toBe(2)
     expect((await repo.getAllPersonnel())).toHaveLength(2)
   })
 

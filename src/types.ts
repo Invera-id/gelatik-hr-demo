@@ -130,6 +130,13 @@ export interface Employee {
   projectId: string | null
   position: string | null
   employmentStatus: EmploymentStatus
+  /**
+   * Whether the current condition (placement + employment status) is confirmed.
+   * Absent/undefined is treated as CONFIRMED everywhere (seed + migrated data).
+   * NEEDS_REVIEW means an import left the current state undetermined; such a
+   * person must not be silently counted as active workforce / eligible.
+   */
+  conditionStatus?: 'CONFIRMED' | 'NEEDS_REVIEW'
   joinDate: string | null
   contractStartDate: string | null
   contractEndDate: string | null

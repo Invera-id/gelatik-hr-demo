@@ -1,9 +1,9 @@
 import type { Area, Project } from '../../types'
 import { COLUMN_TEMPLATE } from './columns'
 import type { SheetTable } from './workbook'
-import type { ImportBatch, ImportException, StoredPersonnel } from './types'
+import type { ImportBatch, ImportException, ReviewItem, ReviewResolution, ReviewStatus, SourceImportRecord, StoredPersonnel } from './types'
 import type { PersonnelRepository } from './repository'
-import type { ImportPlan } from './plan'
+import type { ImportPlan } from './reconcile'
 
 /** Test-only helpers for constructing synthetic workbooks and an in-memory repository. */
 
@@ -40,6 +40,8 @@ export const testProjects: Project[] = [
 /** A minimal in-memory repository used to test planning + commit semantics without IndexedDB. */
 export class InMemoryPersonnelRepository implements PersonnelRepository {
   personnel = new Map<string, StoredPersonnel>()
+  sources = new Map<string, SourceImportRecord>()
+  reviews = new Map<string, ReviewItem>()
   batches: ImportBatch[] = []
   exceptions: ImportException[] = []
   seeded = false
@@ -55,12 +57,27 @@ export class InMemoryPersonnelRepository implements PersonnelRepository {
   async getExceptions(batchId?: string): Promise<ImportException[]> {
     return this.exceptions.filter((e) => !batchId || e.batchId === batchId)
   }
+  async getSourceRecords(businessKey?: string): Promise<SourceImportRecord[]> {
+    return [...this.sources.values()].filter((s) => !businessKey || s.businessKey === businessKey)
+  }
+  async getReviewItems(status?: ReviewStatus): Promise<ReviewItem[]> {
+    return [...this.reviews.values()].filter((r) => !status || r.status === status)
+  }
   async commit(plan: ImportPlan): Promise<void> {
     if (this.failCommit) throw new Error('simulated transaction failure')
     // Mirror IndexedDB atomic semantics: apply all or nothing.
-    for (const record of plan.toPut) this.personnel.set(record.businessKey, record)
+    for (const record of plan.mastersToPut) this.personnel.set(record.businessKey, record)
+    for (const source of plan.sourceRecordsToPut) this.sources.set(source.id, source)
+    for (const item of plan.reviewItemsToPut) this.reviews.set(item.id, item)
     this.batches.push(plan.batch)
     this.exceptions.push(...plan.exceptions)
+  }
+  async resolveReviewItem(id: string, status: ReviewStatus, resolution: ReviewResolution | null): Promise<ReviewItem | null> {
+    const current = this.reviews.get(id)
+    if (!current) return null
+    const updated: ReviewItem = { ...current, status, resolution, updatedAt: new Date().toISOString() }
+    this.reviews.set(id, updated)
+    return updated
   }
   async isSeeded(): Promise<boolean> {
     return this.seeded
@@ -83,6 +100,8 @@ export class InMemoryPersonnelRepository implements PersonnelRepository {
   }
   async clearAll(): Promise<void> {
     this.personnel.clear()
+    this.sources.clear()
+    this.reviews.clear()
     this.batches = []
     this.exceptions = []
     this.seeded = false

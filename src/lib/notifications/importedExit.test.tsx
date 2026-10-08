@@ -20,7 +20,7 @@ const importedPersonnel = (): StoredPersonnel => ({
     submittedAt: '2025-01-01T00:00:00.000Z', revisionNote: null, createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z',
   },
   raw: {}, structured: { scores: {}, measures: {}, booleans: {}, tenureMonths: null }, warnings: [],
-  sourceRowNumber: 2, duplicateInFileCount: 0, fileName: 'f.xlsx', sheetName: 'Database',
+  sourceRowNumber: 2, fileName: 'f.xlsx', sheetName: 'Database',
   batchId: 'b', createdAt: '2025-01-01T00:00:00.000Z', updatedAt: '2025-01-01T00:00:00.000Z',
 })
 

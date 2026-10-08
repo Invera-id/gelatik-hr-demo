@@ -1,20 +1,11 @@
 import type { Area, Project } from '../../types'
 import { parseWorkbook } from './parse'
-import { planImport } from './plan'
+import { reconcile } from './reconcile'
 import type { PersonnelRepository } from './repository'
 import type { SheetTable } from './workbook'
 import { ImportAbortError, type ImportBatch, type ImportException, type ImportSummary, type ImportBatchStatus } from './types'
 
 export type ImportPhase = 'READING' | 'PARSING' | 'SAVING' | 'DONE'
-
-/** A personnel ID that appeared on more than one row in the file (rows were merged). */
-export interface ImportDuplicate {
-  personnelId: string
-  /** Excel row kept as the base record. */
-  keptRow: number
-  /** Excel rows that duplicated this ID and were merged in (last non-empty value wins). */
-  duplicateRows: number[]
-}
 
 export interface ImportRunResult {
   ok: boolean
@@ -22,8 +13,6 @@ export interface ImportRunResult {
   summary: ImportSummary | null
   status: ImportBatchStatus | null
   exceptions: ImportException[]
-  /** Duplicate IDs within the file, with the row numbers involved. */
-  duplicates: ImportDuplicate[]
   /** Error message shown to the user when ok === false. */
   error: string | null
 }
@@ -81,7 +70,7 @@ const nextTick = () => new Promise<void>((resolve) => setTimeout(resolve, 0))
  * On any failure nothing is committed and ok=false is returned (no partial success).
  */
 export const runImport = async (options: RunImportOptions): Promise<ImportRunResult> => {
-  const fail = (error: string): ImportRunResult => ({ ok: false, batch: null, summary: null, status: null, exceptions: [], duplicates: [], error })
+  const fail = (error: string): ImportRunResult => ({ ok: false, batch: null, summary: null, status: null, exceptions: [], error })
 
   if (importInFlight) return fail('Masih ada proses impor yang berjalan. Tunggu hingga selesai sebelum memulai impor lain.')
   const { file, repository, areas, projects, createdBy } = options
@@ -101,10 +90,14 @@ export const runImport = async (options: RunImportOptions): Promise<ImportRunRes
     const parsed = parseWorkbook(sheets, options.date1904 ?? false)
 
     progress('SAVING')
-    const existing = await repository.getAllPersonnel()
+    const [masters, sourceRecords, reviewItems] = await Promise.all([
+      repository.getAllPersonnel(),
+      repository.getSourceRecords(),
+      repository.getReviewItems(),
+    ])
     const batchId = `batch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const now = new Date().toISOString()
-    const plan = planImport(existing, parsed, {
+    const plan = reconcile({ masters, sourceRecords, reviewItems }, parsed, {
       batchId,
       fileName: file.name,
       sheetName: parsed.sheetName,
@@ -115,12 +108,8 @@ export const runImport = async (options: RunImportOptions): Promise<ImportRunRes
     })
     await repository.commit(plan)
 
-    const duplicates: ImportDuplicate[] = parsed.records
-      .filter((record) => record.duplicateInFileCount > 0)
-      .map((record) => ({ personnelId: record.personnelId, keptRow: record.rowNumber, duplicateRows: record.duplicateRowNumbers }))
-
     progress('DONE')
-    return { ok: true, batch: plan.batch, summary: plan.summary, status: plan.status, exceptions: plan.exceptions, duplicates, error: null }
+    return { ok: true, batch: plan.batch, summary: plan.summary, status: plan.status, exceptions: plan.exceptions, error: null }
   } catch (error) {
     const message = error instanceof ImportAbortError
       ? error.message

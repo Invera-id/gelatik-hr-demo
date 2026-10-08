@@ -53,19 +53,19 @@ describe('end-to-end: import → IndexedDB → context → views', () => {
       readWorkbook: async () => sheets,
     })
     expect(result.ok).toBe(true)
-    const importedCount = result.summary?.added ?? 0
+    const importedCount = result.summary?.newMasters ?? 0
     expect(importedCount).toBeGreaterThan(2900)
 
     // First mount: context hydrates from IndexedDB and merges into employees.
     const first = render(<DemoProvider><Probe /></DemoProvider>)
-    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'))
-    await waitFor(() => expect(Number(screen.getByTestId('imported').textContent)).toBe(importedCount))
+    await waitFor(() => expect(screen.getByTestId('ready').textContent).toBe('true'), { timeout: 15000 })
+    await waitFor(() => expect(Number(screen.getByTestId('imported').textContent)).toBe(importedCount), { timeout: 15000 })
     // employees = seed (34) + imported, read from one source.
     expect(Number(screen.getByTestId('employees').textContent)).toBeGreaterThan(importedCount)
     first.unmount()
 
     // Remount simulates a page refresh: data persists, no re-import needed.
     render(<DemoProvider><Probe /></DemoProvider>)
-    await waitFor(() => expect(Number(screen.getByTestId('imported').textContent)).toBe(importedCount))
-  })
+    await waitFor(() => expect(Number(screen.getByTestId('imported').textContent)).toBe(importedCount), { timeout: 15000 })
+  }, 30000)
 })

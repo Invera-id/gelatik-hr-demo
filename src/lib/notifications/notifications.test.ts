@@ -102,7 +102,7 @@ describe('import summary', () => {
   it('produces exactly one notification for the actor regardless of row count', () => {
     const batch: ImportBatch = {
       id: 'batch-1', fileName: 'big.xlsx', sheetName: 'Database', status: 'COMPLETED_WITH_WARNINGS', createdAt: 'now',
-      summary: { fileName: 'big.xlsx', sheetName: 'Database', nonEmptyRows: 3000, uniqueIds: 3000, added: 3000, updated: 0, unchanged: 0, duplicatesInFile: 0, exceptionRows: 0, warningRows: 5, blankRowsSkipped: 0 },
+      summary: { fileName: 'big.xlsx', sheetName: 'Database', nonEmptyRows: 3000, uniqueIdentities: 3000, newMasters: 3000, newSourceRecords: 3000, identicalDuplicates: 0, movementCandidates: 0, exitReentryCandidates: 0, ambiguousCases: 0, identityConflicts: 0, confirmedEvents: 0, warningRows: 5, exceptionRows: 0, blankRowsSkipped: 0, pendingReviewItems: 0 },
     }
     const recs = buildImportSummary({ batch, actor: demoUsers[1], now: 'now' })
     expect(recs).toHaveLength(1)

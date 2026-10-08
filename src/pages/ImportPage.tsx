@@ -1,7 +1,8 @@
-import { AlertCircle, AlertTriangle, CheckCircle2, Database, Download, FileSpreadsheet, HardDriveDownload, Loader2, Upload, XCircle } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle2, Database, Download, FileSpreadsheet, GitCompareArrows, HardDriveDownload, Loader2, Upload, XCircle } from 'lucide-react'
 import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
+import { ImportReviewQueue } from '../components/ImportReviewQueue'
 import { StatusBadge } from '../components/StatusBadge'
 import { useDemo } from '../context/DemoContext'
 import { exportBusinessTable, type ExportValue } from '../lib/excelExport'
@@ -75,14 +76,9 @@ export function ImportPage() {
     }
   }
 
-  const duplicates = result?.ok ? result.duplicates : []
-  const duplicateReason = (personnelId: string, duplicateRows: number[], keptRow: number) =>
-    `ID ${personnelId} berulang pada baris ${duplicateRows.join(', ')} — digabung ke baris ${keptRow} (nilai terisi terakhir menang).`
-
   const downloadIssues = () => {
     const rows: ExportValue[][] = [
       ...exceptions.map((e) => [e.rowNumber, '-', 'EXCEPTION', e.reason, Object.entries(e.rawValues).slice(0, 3).map(([k, v]) => `${k}=${v}`).join('; ')]),
-      ...duplicates.map((d) => [d.keptRow, 'ID Personil', 'DUPLIKAT', duplicateReason(d.personnelId, d.duplicateRows, d.keptRow), d.personnelId]),
       ...warnings.map((w) => [w.rowNumber, w.column, 'WARNING', w.reason, w.rawValue ?? '']),
     ].sort((a, b) => Number(a[0]) - Number(b[0]))
     exportBusinessTable({ headers: ['Baris Excel', 'Kolom', 'Jenis', 'Alasan', 'Nilai Sumber'], rows }, `laporan-masalah-import-${batchId}.csv`)
@@ -92,7 +88,6 @@ export function ImportPage() {
   const statusMeta = result?.ok && result.status ? STATUS_META[result.status] : null
   const issueRows = [
     ...exceptions.map((e) => ({ key: `e-${e.id}`, rowNumber: e.rowNumber, column: '—', type: 'EXCEPTION' as const, reason: e.reason })),
-    ...duplicates.map((d) => ({ key: `d-${d.personnelId}-${d.keptRow}`, rowNumber: d.keptRow, column: 'ID Personil', type: 'DUPLIKAT' as const, reason: duplicateReason(d.personnelId, d.duplicateRows, d.keptRow) })),
     ...warnings.map((w, i) => ({ key: `w-${i}`, rowNumber: w.rowNumber, column: w.column, type: 'WARNING' as const, reason: w.reason })),
   ].sort((a, b) => a.rowNumber - b.rowNumber)
 
@@ -160,24 +155,30 @@ export function ImportPage() {
         </div>
 
         <section className="import-counts">
-          <article className="card"><CheckCircle2 /><strong>{summary.added}</strong><span>Personil ditambahkan</span></article>
-          <article className="card"><HardDriveDownload /><strong>{summary.updated}</strong><span>Personil diperbarui</span></article>
-          <article className="card"><Database /><strong>{summary.unchanged}</strong><span>Tidak berubah</span></article>
-          <article className="card warning"><AlertCircle /><strong>{summary.warningRows}</strong><span>Baris dengan peringatan</span></article>
+          <article className="card"><CheckCircle2 /><strong>{summary.newMasters}</strong><span>Personil baru</span></article>
+          <article className="card"><HardDriveDownload /><strong>{summary.newSourceRecords}</strong><span>Catatan riwayat baru</span></article>
+          <article className="card"><Database /><strong>{summary.identicalDuplicates}</strong><span>Duplikasi identik</span></article>
+          <article className="card warning"><GitCompareArrows /><strong>{summary.pendingReviewItems}</strong><span>Perlu ditinjau</span></article>
           <article className="card error"><XCircle /><strong>{summary.exceptionRows}</strong><span>Baris perlu diperbaiki</span></article>
         </section>
 
         <section className="card">
-          <div className="table-title"><div><span className="section-icon"><FileSpreadsheet /></span><div><h2>Ringkasan Impor</h2><p>Perhitungan lengkap untuk setiap baris sumber.</p></div></div><StatusBadge tone={statusMeta.tone}>{statusMeta.label}</StatusBadge></div>
+          <div className="table-title"><div><span className="section-icon"><FileSpreadsheet /></span><div><h2>Ringkasan Impor</h2><p>Jumlah baris sumber tidak sama dengan jumlah personil — satu personil dapat punya beberapa catatan.</p></div></div><StatusBadge tone={statusMeta.tone}>{statusMeta.label}</StatusBadge></div>
           <div className="summary-grid">
             <div><span>Baris nonkosong</span><strong>{summary.nonEmptyRows}</strong></div>
-            <div><span>ID unik</span><strong>{summary.uniqueIds}</strong></div>
-            <div><span>Duplikat dalam file</span><strong>{summary.duplicatesInFile}</strong></div>
-            <div><span>Baris kosong dilewati</span><strong>{summary.blankRowsSkipped}</strong></div>
-            <div><span>Ditambahkan</span><strong>{summary.added}</strong></div>
-            <div><span>Diperbarui</span><strong>{summary.updated}</strong></div>
-            <div><span>Tidak berubah</span><strong>{summary.unchanged}</strong></div>
+            <div><span>Identitas unik</span><strong>{summary.uniqueIdentities}</strong></div>
+            <div><span>Personil baru</span><strong>{summary.newMasters}</strong></div>
+            <div><span>Catatan riwayat baru</span><strong>{summary.newSourceRecords}</strong></div>
+            <div><span>Duplikasi identik</span><strong>{summary.identicalDuplicates}</strong></div>
+            <div><span>Kandidat movement</span><strong>{summary.movementCandidates}</strong></div>
+            <div><span>Kandidat exit/re-entry</span><strong>{summary.exitReentryCandidates}</strong></div>
+            <div><span>Kasus ambigu</span><strong>{summary.ambiguousCases}</strong></div>
+            <div><span>Konflik identitas</span><strong>{summary.identityConflicts}</strong></div>
+            <div><span>Kejadian terkonfirmasi</span><strong>{summary.confirmedEvents}</strong></div>
+            <div><span>Perlu ditinjau</span><strong>{summary.pendingReviewItems}</strong></div>
+            <div><span>Baris dengan peringatan</span><strong>{summary.warningRows}</strong></div>
             <div><span>Baris exception</span><strong>{summary.exceptionRows}</strong></div>
+            <div><span>Baris kosong dilewati</span><strong>{summary.blankRowsSkipped}</strong></div>
           </div>
         </section>
 
@@ -195,7 +196,7 @@ export function ImportPage() {
                     <tr key={row.key}>
                       <td>{row.rowNumber}</td>
                       <td>{row.column}</td>
-                      <td><StatusBadge tone={row.type === 'EXCEPTION' ? 'danger' : row.type === 'DUPLIKAT' ? 'info' : 'warning'}>{row.type === 'EXCEPTION' ? 'Perlu diperbaiki' : row.type === 'DUPLIKAT' ? 'Duplikat' : 'Peringatan'}</StatusBadge></td>
+                      <td><StatusBadge tone={row.type === 'EXCEPTION' ? 'danger' : 'warning'}>{row.type === 'EXCEPTION' ? 'Perlu diperbaiki' : 'Peringatan'}</StatusBadge></td>
                       <td>{row.reason}</td>
                     </tr>
                   ))}
@@ -207,5 +208,7 @@ export function ImportPage() {
         )}
       </>
     )}
+
+    <ImportReviewQueue />
   </>
 }

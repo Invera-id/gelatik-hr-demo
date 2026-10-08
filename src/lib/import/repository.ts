@@ -1,19 +1,23 @@
-import type { ImportBatch, ImportException, StoredPersonnel } from './types'
+import type { ImportBatch, ImportException, ReviewItem, ReviewResolution, ReviewStatus, SourceImportRecord, StoredPersonnel } from './types'
 import { ImportAbortError } from './types'
-import type { ImportPlan } from './plan'
+import type { ImportPlan } from './reconcile'
 
 /**
  * Storage abstraction for imported personnel. The import feature depends only on
  * this interface, so the IndexedDB implementation can later be swapped for an
  * HTTP/backend implementation without rewriting the parser, normalizers, mapping,
- * validation, or UI.
+ * reconciliation, review, or UI.
  */
 export interface PersonnelRepository {
   getAllPersonnel(): Promise<StoredPersonnel[]>
   getBatches(): Promise<ImportBatch[]>
   getExceptions(batchId?: string): Promise<ImportException[]>
-  /** Apply an import plan atomically: insert/update records, append the batch and exceptions. */
+  getSourceRecords(businessKey?: string): Promise<SourceImportRecord[]>
+  getReviewItems(status?: ReviewStatus): Promise<ReviewItem[]>
+  /** Apply an import plan atomically: masters, source records, review items, batch, exceptions. */
   commit(plan: ImportPlan): Promise<void>
+  /** Update one review item's status + resolution (idempotent re-confirmation via decisionVersion). Returns the stored item. */
+  resolveReviewItem(id: string, status: ReviewStatus, resolution: ReviewResolution | null): Promise<ReviewItem | null>
   isSeeded(): Promise<boolean>
   markSeeded(): Promise<void>
   seedPersonnel(records: StoredPersonnel[]): Promise<void>
@@ -23,11 +27,13 @@ export interface PersonnelRepository {
 }
 
 const DB_NAME = 'gelatik-personnel-db'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const STORE_PERSONNEL = 'personnel'
 const STORE_BATCHES = 'batches'
 const STORE_EXCEPTIONS = 'exceptions'
 const STORE_META = 'meta'
+const STORE_SOURCES = 'sourceRecords'
+const STORE_REVIEWS = 'reviewItems'
 const META_SEEDED = 'seeded'
 
 const promisifyRequest = <T>(request: IDBRequest<T>): Promise<T> =>
@@ -51,6 +57,8 @@ export class IndexedDbPersonnelRepository implements PersonnelRepository {
     if (this.dbPromise) return this.dbPromise
     this.dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
       const request = indexedDB.open(DB_NAME, DB_VERSION)
+      // Runs for a fresh DB and for a v1 → v2 upgrade. Existing stores/data are kept;
+      // only the two new history stores are added.
       request.onupgradeneeded = () => {
         const db = request.result
         if (!db.objectStoreNames.contains(STORE_PERSONNEL)) db.createObjectStore(STORE_PERSONNEL, { keyPath: 'businessKey' })
@@ -60,6 +68,15 @@ export class IndexedDbPersonnelRepository implements PersonnelRepository {
           store.createIndex('batchId', 'batchId', { unique: false })
         }
         if (!db.objectStoreNames.contains(STORE_META)) db.createObjectStore(STORE_META, { keyPath: 'key' })
+        if (!db.objectStoreNames.contains(STORE_SOURCES)) {
+          const store = db.createObjectStore(STORE_SOURCES, { keyPath: 'id' })
+          store.createIndex('businessKey', 'businessKey', { unique: false })
+        }
+        if (!db.objectStoreNames.contains(STORE_REVIEWS)) {
+          const store = db.createObjectStore(STORE_REVIEWS, { keyPath: 'id' })
+          store.createIndex('businessKey', 'businessKey', { unique: false })
+          store.createIndex('status', 'status', { unique: false })
+        }
       }
       request.onsuccess = () => resolve(request.result)
       request.onerror = () => reject(request.error)
@@ -85,29 +102,71 @@ export class IndexedDbPersonnelRepository implements PersonnelRepository {
     const db = await this.open()
     const tx = db.transaction(STORE_EXCEPTIONS, 'readonly')
     const store = tx.objectStore(STORE_EXCEPTIONS)
-    const all = batchId
-      ? await promisifyRequest(store.index('batchId').getAll(batchId) as IDBRequest<ImportException[]>)
-      : await promisifyRequest(store.getAll() as IDBRequest<ImportException[]>)
-    return all
+    return batchId
+      ? promisifyRequest(store.index('batchId').getAll(batchId) as IDBRequest<ImportException[]>)
+      : promisifyRequest(store.getAll() as IDBRequest<ImportException[]>)
+  }
+
+  async getSourceRecords(businessKey?: string): Promise<SourceImportRecord[]> {
+    const db = await this.open()
+    const tx = db.transaction(STORE_SOURCES, 'readonly')
+    const store = tx.objectStore(STORE_SOURCES)
+    return businessKey
+      ? promisifyRequest(store.index('businessKey').getAll(businessKey) as IDBRequest<SourceImportRecord[]>)
+      : promisifyRequest(store.getAll() as IDBRequest<SourceImportRecord[]>)
+  }
+
+  async getReviewItems(status?: ReviewStatus): Promise<ReviewItem[]> {
+    const db = await this.open()
+    const tx = db.transaction(STORE_REVIEWS, 'readonly')
+    const store = tx.objectStore(STORE_REVIEWS)
+    return status
+      ? promisifyRequest(store.index('status').getAll(status) as IDBRequest<ReviewItem[]>)
+      : promisifyRequest(store.getAll() as IDBRequest<ReviewItem[]>)
   }
 
   /**
-   * Single read-write transaction across all three stores. IndexedDB aborts the
+   * Single read-write transaction across the five stores. IndexedDB aborts the
    * whole transaction on any error, so either everything commits or nothing does.
    */
   async commit(plan: ImportPlan): Promise<void> {
     const db = await this.open()
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE_PERSONNEL, STORE_BATCHES, STORE_EXCEPTIONS], 'readwrite')
+      const tx = db.transaction([STORE_PERSONNEL, STORE_BATCHES, STORE_EXCEPTIONS, STORE_SOURCES, STORE_REVIEWS], 'readwrite')
       tx.oncomplete = () => resolve()
       tx.onabort = () => reject(tx.error ?? new ImportAbortError('Transaksi penyimpanan dibatalkan.'))
       tx.onerror = () => reject(tx.error ?? new ImportAbortError('Transaksi penyimpanan gagal.'))
       const personnel = tx.objectStore(STORE_PERSONNEL)
       const batches = tx.objectStore(STORE_BATCHES)
       const exceptions = tx.objectStore(STORE_EXCEPTIONS)
-      for (const record of plan.toPut) personnel.put(record)
+      const sources = tx.objectStore(STORE_SOURCES)
+      const reviews = tx.objectStore(STORE_REVIEWS)
+      for (const record of plan.mastersToPut) personnel.put(record)
+      for (const source of plan.sourceRecordsToPut) sources.put(source)
+      for (const item of plan.reviewItemsToPut) reviews.put(item)
       batches.put(plan.batch)
       for (const exception of plan.exceptions) exceptions.put(exception)
+    })
+  }
+
+  async resolveReviewItem(id: string, status: ReviewStatus, resolution: ReviewResolution | null): Promise<ReviewItem | null> {
+    const db = await this.open()
+    return new Promise<ReviewItem | null>((resolve, reject) => {
+      const tx = db.transaction(STORE_REVIEWS, 'readwrite')
+      const store = tx.objectStore(STORE_REVIEWS)
+      const request = store.get(id) as IDBRequest<ReviewItem | undefined>
+      let updated: ReviewItem | null = null
+      request.onsuccess = () => {
+        const current = request.result
+        if (current) {
+          updated = { ...current, status, resolution, updatedAt: new Date().toISOString() }
+          store.put(updated)
+        }
+      }
+      request.onerror = () => reject(request.error)
+      tx.oncomplete = () => resolve(updated)
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
     })
   }
 
@@ -166,13 +225,15 @@ export class IndexedDbPersonnelRepository implements PersonnelRepository {
   async clearAll(): Promise<void> {
     const db = await this.open()
     await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction([STORE_PERSONNEL, STORE_BATCHES, STORE_EXCEPTIONS, STORE_META], 'readwrite')
+      const tx = db.transaction([STORE_PERSONNEL, STORE_BATCHES, STORE_EXCEPTIONS, STORE_META, STORE_SOURCES, STORE_REVIEWS], 'readwrite')
       tx.oncomplete = () => resolve()
       tx.onerror = () => reject(tx.error)
       tx.objectStore(STORE_PERSONNEL).clear()
       tx.objectStore(STORE_BATCHES).clear()
       tx.objectStore(STORE_EXCEPTIONS).clear()
       tx.objectStore(STORE_META).clear()
+      tx.objectStore(STORE_SOURCES).clear()
+      tx.objectStore(STORE_REVIEWS).clear()
     })
   }
 }

@@ -32,7 +32,7 @@ export const selectDashboardData = (employees: Employee[], exits: EmployeeExit[]
   const gaps = fulfilled.flatMap((need) => need.gapWorkingDays === null ? [] : [need.gapWorkingDays])
   return {
     employees: selectedEmployees,
-    activeEmployees: selectedEmployees.filter((employee) => employee.employmentStatus === 'ACTIVE' && employee.validationStatus === 'VALIDATED'),
+    activeEmployees: selectedEmployees.filter((employee) => employee.employmentStatus === 'ACTIVE' && employee.validationStatus === 'VALIDATED' && employee.conditionStatus !== 'NEEDS_REVIEW'),
     exits: selectedExits,
     needs: selectedNeeds,
     fulfilled,

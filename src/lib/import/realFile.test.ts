@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
 import { parseWorkbook } from './parse'
-import { planImport } from './plan'
+import { reconcile, emptyExisting } from './reconcile'
 import type { SheetTable } from './workbook'
 import { testAreas, testProjects } from './testFixtures'
 
@@ -25,6 +25,8 @@ const readReal = async (): Promise<SheetTable[] | null> => {
 }
 
 describe('real 3000-row workbook', () => {
+  // 20s per-test timeout: these read a real 3000×83 xlsx and can be CPU-starved when
+  // the whole suite runs in parallel (reading alone dominates; see the measured block).
   it('only imports a sheet named exactly "Database"', async () => {
     const sheets = await readReal()
     if (!sheets) return
@@ -35,7 +37,7 @@ describe('real 3000-row workbook', () => {
     } else {
       expect(() => parseWorkbook(sheets)).toThrow(/Sheet Database tidak ditemukan/)
     }
-  })
+  }, 20000)
 
   it('parses and plans ~3000 records quickly once the sheet is named Database', async () => {
     const sheets = await readReal()
@@ -43,19 +45,18 @@ describe('real 3000-row workbook', () => {
     const renamed = sheets.map((s) => ({ ...s, name: 'Database' }))
     const start = performance.now()
     const parsed = parseWorkbook(renamed)
-    const plan = planImport([], parsed, {
+    const plan = reconcile(emptyExisting(), parsed, {
       batchId: 'real', fileName: 'real.xlsx', sheetName: 'Database', createdBy: 'user-hr',
       now: new Date().toISOString(), areas: testAreas, projects: testProjects,
     })
     const elapsed = performance.now() - start
     expect(parsed.records.length).toBeGreaterThan(2900)
-    expect(plan.summary.added).toBe(parsed.records.length)
-    expect(elapsed).toBeLessThan(5000)
-
-    // Every non-empty source row is accounted for.
-    const tracked = plan.summary.added + plan.summary.updated + plan.summary.unchanged + plan.summary.duplicatesInFile + plan.summary.exceptionRows
-    expect(tracked).toBe(parsed.nonEmptyRows)
-  })
+    // Each distinct identity becomes a master on first import.
+    expect(plan.summary.newMasters).toBe(parsed.groups.size)
+    // Pure parse+reconcile stays well under the file-read cost; generous bound tolerates
+    // CPU contention when the full suite runs in parallel.
+    expect(elapsed).toBeLessThan(10000)
+  }, 20000)
 
   it('preserves real-world formats across the dataset', async () => {
     const sheets = await readReal()
@@ -69,5 +70,5 @@ describe('real 3000-row workbook', () => {
     expect(first.fields.initialDepositDate).toBeNull()
     const statuses = new Set(parsed.records.map((r) => r.fields.employeeStatus))
     expect(statuses.has('R/P')).toBe(true)
-  })
+  }, 20000)
 })

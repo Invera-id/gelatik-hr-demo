@@ -2,18 +2,18 @@ import { locateHeaderRow, selectDatabaseSheet, type SheetTable } from './workboo
 import { mapRow, type MappedRow } from './mapping'
 import { cleanText } from './normalizers'
 import { SIGNATURE_HEADERS } from './columns'
+import { businessFingerprint } from './fingerprint'
 import type { FieldIssue, PersonnelStructured } from './types'
 
 /** Normalize ID Personil into the unique business key (trim + upper-case). */
 export const toBusinessKey = (personnelId: string): string => cleanText(personnelId).toUpperCase()
 
-export interface ParsedRecord extends MappedRow {
+/** One distinct source row (identity-valid, non-blank), with its content fingerprint. */
+export interface ParsedSourceRecord extends MappedRow {
   businessKey: string
   personnelId: string
   name: string
-  duplicateInFileCount: number
-  /** Excel row numbers of the additional in-file occurrences that were merged in. */
-  duplicateRowNumbers: number[]
+  fingerprint: string
 }
 
 export interface ParseException {
@@ -27,8 +27,12 @@ export interface ParseResult {
   headerRowIndex: number
   nonEmptyRows: number
   blankRowsSkipped: number
-  duplicatesInFile: number
-  records: ParsedRecord[]
+  /** Rows dropped because an identical (same fingerprint) row for that ID was already seen in this file. */
+  identicalDuplicatesInFile: number
+  /** All DISTINCT source records (one per distinct fingerprint per ID). Never merged. */
+  records: ParsedSourceRecord[]
+  /** Distinct records grouped by normalized ID Personil. */
+  groups: Map<string, ParsedSourceRecord[]>
   exceptions: ParseException[]
   warnings: FieldIssue[]
 }
@@ -75,20 +79,28 @@ const looksLikeHeaderRepeat = (row: unknown[]): boolean => {
 }
 
 /**
- * Parse the chosen Database sheet into deduplicated, identity-valid personnel records,
- * plus exceptions and warnings. Pure: performs no I/O and touches no database.
- * Throws ImportAbortError (via selectDatabaseSheet / locateHeaderRow) on fatal structure problems.
+ * Parse the chosen Database sheet into DISTINCT, identity-valid source records,
+ * grouped by normalized ID Personil. Rows are NOT merged: several distinct rows
+ * for the same ID are all kept (they may represent history). Only rows whose
+ * normalized business content is identical (same fingerprint) are collapsed, so
+ * re-importing the same row stays idempotent. Classification of each group
+ * (duplicate vs movement/exit/conflict) happens later, in classify.ts.
+ *
+ * Pure: performs no I/O and touches no database. Throws ImportAbortError (via
+ * selectDatabaseSheet / locateHeaderRow) on fatal structure problems.
  */
 export const parseWorkbook = (sheets: SheetTable[], date1904 = false): ParseResult => {
   const sheet = selectDatabaseSheet(sheets)
   const header = locateHeaderRow(sheet.rows)
 
-  const records: ParsedRecord[] = []
-  const byKey = new Map<string, ParsedRecord>()
+  const records: ParsedSourceRecord[] = []
+  const groups = new Map<string, ParsedSourceRecord[]>()
+  /** `${businessKey}:${fingerprint}` already seen in THIS file. */
+  const seenInFile = new Set<string>()
   const exceptions: ParseException[] = []
   let nonEmptyRows = 0
   let blankRowsSkipped = 0
-  let duplicatesInFile = 0
+  let identicalDuplicatesInFile = 0
 
   for (let i = header.rowIndex + 1; i < sheet.rows.length; i++) {
     const row = sheet.rows[i] ?? []
@@ -112,34 +124,20 @@ export const parseWorkbook = (sheets: SheetTable[], date1904 = false): ParseResu
     }
 
     const businessKey = toBusinessKey(personnelId)
-    const existing = byKey.get(businessKey)
-    if (!existing) {
-      const record: ParsedRecord = { ...mapped, businessKey, personnelId, name, duplicateInFileCount: 0, duplicateRowNumbers: [] }
-      byKey.set(businessKey, record)
-      records.push(record)
+    const fingerprint = businessFingerprint(mapped.fields)
+    const dedupeKey = `${businessKey}:${fingerprint}`
+    if (seenInFile.has(dedupeKey)) {
+      // Byte-for-byte identical business content already captured → not history.
+      identicalDuplicatesInFile++
       continue
     }
+    seenInFile.add(dedupeKey)
 
-    // Duplicate ID within the same file.
-    const existingKtp = existing.fields.nationalId
-    const incomingKtp = mapped.fields.nationalId
-    if (existingKtp && incomingKtp && existingKtp !== incomingKtp) {
-      // Two different complete NoKTP for one ID → do not merge silently.
-      exceptions.push({
-        rowNumber,
-        reason: `Konflik identitas: ID ${personnelId} memiliki NoKTP berbeda (${existingKtp} vs ${incomingKtp}). Baris ini disimpan sebagai exception.`,
-        rawValues: mapped.rawValues,
-      })
-      continue
-    }
-
-    existing.fields = mergeFields(existing.fields, mapped.fields)
-    existing.structured = mergeStructured(existing.structured, mapped.structured)
-    existing.warnings = [...existing.warnings, ...mapped.warnings]
-    existing.duplicateInFileCount++
-    existing.duplicateRowNumbers.push(rowNumber)
-    existing.name = existing.fields.name ?? existing.name
-    duplicatesInFile++
+    const record: ParsedSourceRecord = { ...mapped, businessKey, personnelId, name, fingerprint }
+    records.push(record)
+    const group = groups.get(businessKey)
+    if (group) group.push(record)
+    else groups.set(businessKey, [record])
   }
 
   const warnings = records.flatMap((record) => record.warnings)
@@ -148,8 +146,9 @@ export const parseWorkbook = (sheets: SheetTable[], date1904 = false): ParseResu
     headerRowIndex: header.rowIndex,
     nonEmptyRows,
     blankRowsSkipped,
-    duplicatesInFile,
+    identicalDuplicatesInFile,
     records,
+    groups,
     exceptions,
     warnings,
   }

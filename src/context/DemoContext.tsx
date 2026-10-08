@@ -2,11 +2,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState, type ReactNode } from 'react'
 import { areas, createInitialData, demoUsers } from '../data/demoData'
 import { allowedAreaIds, canValidateTransaction, cloneDefaultPermissions, defaultValidationPolicy, hasPermission } from '../config/access'
-import { calculateWorkingDayGap, getCandidateEligibility, getFulfillmentBlockers, getGapStatus, hasCompleteSourceData } from '../lib/businessRules'
+import { calculateWorkingDayGap, canReviewImportItem, getCandidateEligibility, getFulfillmentBlockers, getGapStatus, hasCompleteSourceData } from '../lib/businessRules'
 import type { DemoData, DemoUser, Employee, EmployeeExit, EmployeeFlagStatus, EmployeeMovement, MovementEvent, Permission, PlacementChangeRequest, Project, ProjectQuota, ReplacementNeed, Role, ScopeType, TransactionType, ValidationStatus, ValidatorAuthority } from '../types'
 import { personnelRepository } from '../lib/import/repository'
 import { runImport, type ImportPhase, type ImportRunResult } from '../lib/import/service'
-import type { ImportBatch, ImportException, StoredPersonnel } from '../lib/import/types'
+import type { ImportBatch, ImportException, ReviewDecision, ReviewItem, SourceImportRecord, StoredPersonnel } from '../lib/import/types'
+import { deriveImportMovements } from '../lib/import/derivedEvents'
 import { clearAll as clearNotifications, emit as emitNotifications, resolveByDedupePrefix } from '../lib/notifications/service'
 import * as notify from '../lib/notifications/events'
 import type { AccessContext } from '../lib/notifications/rules'
@@ -242,11 +243,17 @@ export interface DemoContextValue extends DemoData {
   importedPersonnel: StoredPersonnel[]
   importBatches: ImportBatch[]
   importExceptions: ImportException[]
+  importReviewItems: ReviewItem[]
+  importSourceRecords: SourceImportRecord[]
   importStorageReady: boolean
   importStorageError: string | null
   canImportPersonnel: boolean
   importPersonnelFile: (file: File, onProgress?: (phase: ImportPhase) => void) => Promise<ImportRunResult>
   refreshPersonnel: () => Promise<void>
+  /** Pending import history (undecided) for a given master employee id. */
+  pendingReviewFor: (employeeId: string) => ReviewItem[]
+  /** Resolve one import review item (confirm movement/exit/re-entry, mark dup/profile/correction, or keep pending). */
+  resolveReviewItem: (id: string, decision: ReviewDecision) => Promise<void>
   saveProject: (project: Project) => void
   setProjectStatus: (projectId: string, status: Project['status']) => void
   saveProjectQuota: (quota: ProjectQuota) => void
@@ -272,19 +279,25 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   const [importedPersonnel, setImportedPersonnel] = useState<StoredPersonnel[]>([])
   const [importBatches, setImportBatches] = useState<ImportBatch[]>([])
   const [importExceptions, setImportExceptions] = useState<ImportException[]>([])
+  const [importReviewItems, setImportReviewItems] = useState<ReviewItem[]>([])
+  const [importSourceRecords, setImportSourceRecords] = useState<SourceImportRecord[]>([])
   const [importStorageReady, setImportStorageReady] = useState(false)
   const [importStorageError, setImportStorageError] = useState<string | null>(null)
 
   const refreshPersonnel = useCallback(async () => {
     try {
-      const [personnel, batches, exceptions] = await Promise.all([
+      const [personnel, batches, exceptions, reviews, sources] = await Promise.all([
         personnelRepository.getAllPersonnel(),
         personnelRepository.getBatches(),
         personnelRepository.getExceptions(),
+        personnelRepository.getReviewItems(),
+        personnelRepository.getSourceRecords(),
       ])
       setImportedPersonnel(personnel)
       setImportBatches(batches)
       setImportExceptions(exceptions)
+      setImportReviewItems(reviews)
+      setImportSourceRecords(sources)
       setImportStorageError(null)
     } catch (error) {
       setImportStorageError(error instanceof Error ? error.message : 'Penyimpanan lokal tidak tersedia.')
@@ -301,12 +314,15 @@ export function DemoProvider({ children }: { children: ReactNode }) {
 
   const importPersonnelFile = useCallback(async (file: File, onProgress?: (phase: ImportPhase) => void): Promise<ImportRunResult> => {
     if (!currentUser || !['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) || !hasPermission(currentUser, state.permissionConfig, 'create_employee')) {
-      return { ok: false, batch: null, summary: null, status: null, exceptions: [], duplicates: [], error: 'Anda tidak memiliki izin untuk mengimpor personil.' }
+      return { ok: false, batch: null, summary: null, status: null, exceptions: [], error: 'Anda tidak memiliki izin untuk mengimpor personil.' }
     }
     const result = await runImport({ file, repository: personnelRepository, areas, projects: state.projects, createdBy: currentUser.id, onProgress })
     // One summary notification per operation (not per row); failures notify the actor too.
     if (result.ok && result.batch) {
-      emitNotifications(notify.buildImportSummary({ batch: result.batch, actor: currentUser, now: new Date().toISOString() }))
+      const now = new Date().toISOString()
+      emitNotifications(notify.buildImportSummary({ batch: result.batch, actor: currentUser, now }))
+      // One extra "history needs review" notice per batch (never one per row).
+      emitNotifications(notify.buildReviewNeeded({ batch: result.batch, actor: currentUser, now }))
       await refreshPersonnel()
     } else if (!result.ok) {
       emitNotifications(notify.buildImportFailure({ fileName: file.name, error: result.error ?? 'Impor gagal.', actor: currentUser, now: new Date().toISOString(), opId: `${file.name}-${Date.now()}` }))
@@ -322,6 +338,25 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     return [...map.values()]
   }, [importedPersonnel, state.employees])
 
+  // Confirmed import history, derived as a VIEW over the IndexedDB review decisions
+  // and merged (idempotently, by deterministic id) into the career timeline the
+  // detail page reads. No cross-store write happens here (§8, §13).
+  const combinedMovements = useMemo(() => {
+    const employeeIdByKey = new Map(importedPersonnel.map((p) => [p.businessKey, p.employee.id]))
+    const derived = deriveImportMovements(importReviewItems, importSourceRecords, { employeeIdByKey, areas, projects: state.projects })
+    const byId = new Map<string, EmployeeMovement>()
+    for (const m of state.employeeMovements) byId.set(m.id, m)
+    for (const m of derived) byId.set(m.id, m)
+    return [...byId.values()]
+  }, [importReviewItems, importSourceRecords, importedPersonnel, state.employeeMovements, state.projects])
+
+  /** Pending import history still awaiting a review decision, for the current person. */
+  const pendingReviewFor = (employeeId: string): ReviewItem[] => {
+    const key = importedPersonnel.find((p) => p.employee.id === employeeId)?.businessKey
+    if (!key) return []
+    return importReviewItems.filter((r) => r.businessKey === key && r.status === 'PENDING')
+  }
+
   // Access context + helpers for business actions. Employee lookups use the combined
   // source so actions (exit, movement, validation, notifications) also work for
   // IndexedDB-backed imported personnel, not only the localStorage seed.
@@ -336,8 +371,8 @@ export function DemoProvider({ children }: { children: ReactNode }) {
   }
 
   const value: DemoContextValue = {
-    projects: state.projects, projectQuotas: state.projectQuotas, employees: combinedEmployees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: state.employeeMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy, currentUser,
-    importedPersonnel, importBatches, importExceptions, importStorageReady, importStorageError, canImportPersonnel, importPersonnelFile, refreshPersonnel,
+    projects: state.projects, projectQuotas: state.projectQuotas, employees: combinedEmployees, employeeExits: state.employeeExits, replacementNeeds: state.replacementNeeds, movements: state.movements, employeeMovements: combinedMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy, currentUser,
+    importedPersonnel, importBatches, importExceptions, importReviewItems, importSourceRecords, importStorageReady, importStorageError, canImportPersonnel, importPersonnelFile, refreshPersonnel, pendingReviewFor,
     login: (email, password) => {
       const user = demoUsers.find((item) => item.email.toLowerCase() === email.toLowerCase().trim() && item.password === password)
       if (!user) return false
@@ -433,6 +468,48 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       emitNotifications(notify.buildReentry({ employee: { ...target, areaId }, actor: currentUser, ctx: accessCtx, now: nowIso() }))
     },
     importEmployees: (employees) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && hasPermission(currentUser, state.permissionConfig, 'create_employee') && dispatch({ type: 'IMPORT_EMPLOYEES', employees }),
+    resolveReviewItem: async (id, decision) => {
+      const item = importReviewItems.find((r) => r.id === id)
+      if (!currentUser || !item || !canReviewImportItem(currentUser, state.permissionConfig, item)) return
+      const now = new Date().toISOString()
+      // KEPT_PENDING leaves the item (and the person's NEEDS_REVIEW) untouched.
+      if (decision.keepPending) {
+        await personnelRepository.resolveReviewItem(id, 'KEPT_PENDING', null)
+        await refreshPersonnel()
+        return
+      }
+      // Dup / profile / correction resolve WITHOUT a timeline event; the rest confirm one.
+      const confirmsEvent = ['PLACEMENT_CHANGE', 'EXIT', 'REENTRY'].includes(decision.decisionKind)
+      const status = confirmsEvent ? 'CONFIRMED' as const : 'DISMISSED' as const
+      const decisionVersion = (item.resolution?.decisionVersion ?? 0) + 1
+      await personnelRepository.resolveReviewItem(id, status, {
+        decisionKind: decision.decisionKind,
+        movementType: decision.movementType,
+        effectiveDate: decision.effectiveDate ?? null,
+        exitScope: decision.exitScope,
+        beforeRecordId: decision.beforeRecordId ?? null,
+        afterRecordId: decision.afterRecordId ?? null,
+        note: decision.note,
+        reviewedBy: currentUser.id,
+        reviewedAt: now,
+        decisionVersion,
+      })
+      // Conservatively update the master's current condition only for a concrete confirm.
+      const employeeId = importedPersonnel.find((p) => p.businessKey === item.businessKey)?.employee.id
+      if (employeeId && decision.decisionKind !== 'IDENTITY_CONFLICT') {
+        const patch: Partial<Employee> = { conditionStatus: 'CONFIRMED' }
+        const after = decision.afterRecordId ? importSourceRecords.find((s) => s.id === decision.afterRecordId) : undefined
+        if (confirmsEvent && after) {
+          const areaId = areas.find((a) => a.name.toLowerCase() === (after.fields.areaCbs ?? '').toLowerCase())?.id ?? null
+          const projectId = state.projects.find((p) => p.name.toLowerCase() === (after.fields.projectName ?? '').toLowerCase())?.id ?? null
+          if (decision.decisionKind === 'PLACEMENT_CHANGE') Object.assign(patch, { areaId, projectId, position: after.fields.position ?? null })
+        }
+        if (decision.decisionKind === 'EXIT' && decision.exitScope === 'EMPLOYMENT_END') patch.employmentStatus = 'INACTIVE'
+        if (decision.decisionKind === 'REENTRY') patch.employmentStatus = 'ACTIVE'
+        await personnelRepository.patchEmployee(employeeId, patch)
+      }
+      await refreshPersonnel()
+    },
     saveProject: (project) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && dispatch({ type: 'SAVE_PROJECT', project }),
     setProjectStatus: (projectId, status) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && dispatch({ type: 'SET_PROJECT_STATUS', projectId, status }),
     saveProjectQuota: (quota) => currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && dispatch({ type: 'SAVE_PROJECT_QUOTA', quota }),
