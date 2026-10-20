@@ -33,8 +33,8 @@ export function ReplacementDetailPage() {
   const [search, setSearch] = useState('')
   const need = replacementNeeds.find((item) => item.id === needId)
   const inferredHistorical = Boolean(need?.id.startsWith('import-assumed-'))
-  const scopedAreas = currentUser ? allowedAreaIds(currentUser, permissionConfig) : []
-  const candidates = useMemo(() => need ? employees.filter((employee) => employee.id !== need.originalEmployeeId && (!search || employee.name.toLowerCase().includes(search.toLowerCase()) || employee.personnelId.toLowerCase().includes(search.toLowerCase()))).sort((a, b) => Number(getCandidateEligibility(need, b, replacementNeeds).eligible) - Number(getCandidateEligibility(need, a, replacementNeeds).eligible)) : [], [employees, need, replacementNeeds, search])
+  const scopedAreas = useMemo(() => currentUser ? allowedAreaIds(currentUser, permissionConfig) : [], [currentUser, permissionConfig])
+  const candidates = useMemo(() => need ? employees.filter((employee) => (scopedAreas === null || Boolean(employee.areaId && scopedAreas.includes(employee.areaId))) && employee.id !== need.originalEmployeeId && (!search || employee.name.toLowerCase().includes(search.toLowerCase()) || employee.personnelId.toLowerCase().includes(search.toLowerCase()))).sort((a, b) => Number(getCandidateEligibility(need, b, replacementNeeds).eligible) - Number(getCandidateEligibility(need, a, replacementNeeds).eligible)) : [], [employees, need, replacementNeeds, scopedAreas, search])
   if (!currentUser || !need || (scopedAreas !== null && (!need.areaId || !scopedAreas.includes(need.areaId)))) return <Navigate to="/replacements" replace />
   const original = employees.find((item) => item.id === need.originalEmployeeId)
   const replacement = employees.find((item) => item.id === need.replacementEmployeeId)

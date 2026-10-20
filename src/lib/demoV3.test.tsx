@@ -132,17 +132,15 @@ describe('V3 calculated analytics', () => {
     expect(metric.turnoverRate).toBe(turnoverRate(metric.turnover, metric.quota))
   })
 
-  it('keeps template-derived quota independent from legacy manual quota records', () => {
+  it('uses an explicitly configured monthly quota when one exists', () => {
     const project = data.projects[0]
     const source = {
       ...data,
       projectQuotas: [{ id: 'quota-test', projectId: project.id, period: '2026-10', quota: 123 }],
     }
     const metric = getProjectMetrics(source, project, '2026-10')
-    const withoutLegacyQuota = getProjectMetrics({ ...source, projectQuotas: [] }, project, '2026-10')
-
-    expect(metric.quotaSource).toBe('MASTER_COUNT')
-    expect(metric.quota).toBe(withoutLegacyQuota.quota)
+    expect(metric.quotaSource).toBe('MANUAL')
+    expect(metric.quota).toBe(123)
   })
 
   it('reconciles the template roll-forward: next quota excludes prior-month turnover', () => {

@@ -389,6 +389,10 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     if (!currentUser || !hasPermission(currentUser, state.permissionConfig, 'import_personnel')) {
       return { ok: false, batch: null, summary: null, status: null, exceptions: [], error: 'Anda tidak memiliki izin untuk mengimpor personil.' }
     }
+    const currentScope = importAllowedAreaNames()
+    if (JSON.stringify(currentScope === null ? null : [...currentScope].sort()) !== JSON.stringify(prepared.allowedAreaNames)) {
+      return { ok: false, batch: null, summary: null, status: null, exceptions: [], error: 'Cakupan Area berubah sejak preview dibuat. Pilih ulang file agar data divalidasi dengan scope terbaru.' }
+    }
     onProgress?.('SAVING')
     const result = await commitPreparedImport(prepared, personnelRepository)
     if (result.ok && result.batch) {
@@ -400,7 +404,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       await refreshPersonnel()
     }
     return result
-  }, [currentUser, state.permissionConfig, refreshPersonnel])
+  }, [currentUser, state.permissionConfig, refreshPersonnel, importAllowedAreaNames])
 
   // Canonical identity is normalized Personnel ID, not storage-specific internal id.
   const combinedEmployees = useMemo(() => {

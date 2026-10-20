@@ -16,6 +16,7 @@ export interface PreparedImport {
   discoveredAreas: Area[]
   discoveredProjects: Project[]
   scopePreview: ImportScopePreview
+  allowedAreaNames: string[] | null
 }
 
 export interface OutOfScopeImportRow {
@@ -187,7 +188,7 @@ export const prepareImport = async (options: RunImportOptions): Promise<PrepareI
       outOfScopeRows: scoped.excludedRows.length,
       excludedRows: scoped.excludedRows,
     }
-    return { ok: true, prepared: { plan, repositorySnapshot: repositorySignature(masters, sourceRecords, reviewItems), discoveredAreas: references.discoveredAreas, discoveredProjects: references.discoveredProjects, scopePreview }, error: null }
+    return { ok: true, prepared: { plan, repositorySnapshot: repositorySignature(masters, sourceRecords, reviewItems), discoveredAreas: references.discoveredAreas, discoveredProjects: references.discoveredProjects, scopePreview, allowedAreaNames: options.allowedAreaNames == null ? null : [...options.allowedAreaNames].sort() }, error: null }
   } catch (error) {
     return fail(error instanceof ImportAbortError ? error.message : 'Impor gagal karena kesalahan tak terduga. Data lama tetap utuh.')
   } finally {

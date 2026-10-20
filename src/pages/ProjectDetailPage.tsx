@@ -20,7 +20,7 @@ export function ProjectDetailPage() {
   const [quotaInput, setQuotaInput] = useState(() => project ? String(getProjectMetrics(source, project, period).quota) : '0')
   if (!project || (allowed !== null && !allowed.includes(project.areaId))) return <Navigate to="/projects" replace />
   const metrics = getProjectMetrics(source, project, period)
-  const members = employees.filter((employee) => employee.projectId === project.id)
+  const members = employees.filter((employee) => employee.projectId === project.id && (allowed === null || Boolean(employee.areaId && allowed.includes(employee.areaId))))
   const term = getTerminationRows(source, [project])[0]
   const canManageQuota = Boolean(currentUser && hasPermission(currentUser, permissionConfig, 'manage_project_quota'))
   const saveQuota = () => {

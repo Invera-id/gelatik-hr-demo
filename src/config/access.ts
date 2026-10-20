@@ -78,9 +78,10 @@ export const migratePermissionConfig = (stored: unknown): RolePermissionConfig[]
     const hasLegacyKeys = [...source].some((key) => ['edit_employee', 'create_exit', 'validate_employee', 'validate_exit', 'manage_users'].includes(key))
     const permissions = allPermissions.filter((permission) => {
       if (source.has(permission)) return true
+      if (!hasLegacyKeys) return false
       const legacy = legacyPermissionMap[permission]
       if (legacy) return source.has(legacy)
-      if (hasLegacyKeys && ['view_dashboard', 'view_employee', 'create_employee', 'view_replacement', 'match_replacement', 'fulfill_replacement', 'export_data', 'manage_roles'].includes(permission)) return false
+      if (['view_dashboard', 'view_employee', 'create_employee', 'view_replacement', 'match_replacement', 'fulfill_replacement', 'export_data', 'manage_roles'].includes(permission)) return false
       return fallback.permissions.includes(permission)
     })
     if (role === 'SUPER_ADMIN') lockedSuperAdminPermissions.forEach((permission) => { if (!permissions.includes(permission)) permissions.push(permission) })
@@ -140,7 +141,7 @@ export const permissionSummary = (permissions: Permission[]) => {
   const writePermissions: Permission[] = ['create_employee', 'edit_employee_basic', 'request_placement_change', 'request_employee_exit', 'reentry_employee', 'manage_employee_notes_flags', 'import_personnel', 'manage_project', 'toggle_project_status', 'manage_project_quota']
   const validationPermissions: Permission[] = ['validate_employee_entry_edit', 'validate_placement_change', 'validate_employee_exit', 'bulk_validate']
   const adminPermissions: Permission[] = ['manage_roles', 'manage_validation_policy', 'reset_demo_data']
-  if (adminPermissions.some((permission) => active.has(permission)) || active.size >= Math.ceil(allPermissions.length * 0.8)) return 'Full access'
+  if (adminPermissions.some((permission) => active.has(permission)) || active.size === allPermissions.length) return 'Full access'
   if (validationPermissions.some((permission) => active.has(permission))) return 'Validator'
   if (writePermissions.some((permission) => active.has(permission))) return 'Data entry'
   return 'Read-only'
