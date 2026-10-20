@@ -1,3 +1,5 @@
+import { isSampleMode } from '../../config/dataMode'
+
 /** Categories group notifications for filtering and iconography. */
 export type NotificationCategory =
   | 'VALIDATION_REQUEST'
@@ -75,5 +77,5 @@ export interface NotificationSpec {
 }
 
 export const STORE_VERSION = 1
-export const STORAGE_KEY = 'gelatik-notifications-v1'
-export const BROADCAST_CHANNEL = 'gelatik-notifications'
+export const STORAGE_KEY = isSampleMode ? 'gelatik-notifications-v1' : 'gelatik-import-only-notifications-v1'
+export const BROADCAST_CHANNEL = isSampleMode ? 'gelatik-notifications' : 'gelatik-import-only-notifications'

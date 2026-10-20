@@ -14,6 +14,7 @@ import type {
   SourceImportRecord,
   StoredPersonnel,
 } from './types'
+import { findAreaId, findProjectId } from './referenceCatalog'
 
 export interface ReconcileInput {
   masters: StoredPersonnel[]
@@ -126,6 +127,10 @@ export const reconcile = (
   for (const [businessKey, group] of parsed.groups) {
     const prior = mastersByKey.get(businessKey)
     const priorSources = existingSourceByKey.get(businessKey) ?? []
+    if (group.every((record) => existingSourceById.has(`${record.businessKey}:${record.fingerprint}`))) {
+      identicalDuplicates += group.length
+      continue
+    }
 
     // Classify over the full history: the existing master's confirmed condition
     // (as a pseudo-record), any stored source records, and the new rows — so an
@@ -139,16 +144,19 @@ export const reconcile = (
       ...group.map((r) => ({ id: `${r.businessKey}:${r.fingerprint}`, fingerprint: r.fingerprint, rowNumber: r.rowNumber, fields: r.fields })),
     ]
     const analysis = classifyGroup(combinedClassify)
+    const mappingRecord = group.find((record) => !record.fields.exitDate) ?? group[0]
+    const mappedAreaId = findAreaId(mappingRecord.fields.areaCbs, options.areas)
+    const mappedProjectId = findProjectId(mappingRecord.fields.projectName, mappedAreaId, options.projects)
+    const unknownPlacement = !mappedAreaId || !mappedProjectId || !mappingRecord.fields.position || !mappingRecord.fields.joinDate
 
     // Route: identity conflict > auto-confirm (new master only) > review > identical.
     // An existing confirmed master is never auto-updated — changes go to review (§7).
-    const route: 'CONFLICT' | 'AUTO' | 'REVIEW' | 'IDENTICAL' =
+    const route: 'CONFLICT' | 'REVIEW' | 'IDENTICAL' =
       analysis.identityConflict ? 'CONFLICT'
-        : analysis.autoConfirmable && !prior ? 'AUTO'
-          : analysis.aspects.length > 0 || (analysis.autoConfirmable && prior) ? 'REVIEW'
-            : 'IDENTICAL'
+        : analysis.aspects.length > 0 || analysis.autoConfirmable || unknownPlacement ? 'REVIEW'
+          : 'IDENTICAL'
     const srcStatus: SourceImportRecord['reconciliationStatus'] =
-      route === 'AUTO' ? 'CONFIRMED' : route === 'IDENTICAL' ? 'IDENTICAL' : 'PENDING_REVIEW'
+      route === 'IDENTICAL' ? 'IDENTICAL' : 'PENDING_REVIEW'
 
     // Emit source records (deduped by id); count only genuinely new ones.
     for (const r of group) {
@@ -165,12 +173,9 @@ export const reconcile = (
 
     // ---- Master handling ----
     if (!prior) {
-      const conditionStatus = analysis.needsReview || analysis.identityConflict ? 'NEEDS_REVIEW' as const : 'CONFIRMED' as const
+      const conditionStatus = route === 'REVIEW' || analysis.needsReview || analysis.identityConflict || unknownPlacement ? 'NEEDS_REVIEW' as const : 'CONFIRMED' as const
       // Auto-confirm uses the AFTER record as the confirmed current condition.
-      const afterRecord = analysis.autoConfirmable
-        ? group.find((r) => `${r.businessKey}:${r.fingerprint}` === analysis.autoConfirmable!.afterRecordId) ?? representative
-        : representative
-      const chosen = analysis.autoConfirmable ? afterRecord : representative
+      const chosen = representative
       mastersToPut.push(toStoredPersonnel(chosen, {
         batchId: options.batchId, fileName: options.fileName, sheetName: options.sheetName,
         createdBy: options.createdBy, now: options.now,
@@ -200,6 +205,7 @@ export const reconcile = (
       const item: ReviewItem = {
         id, businessKey, personnelId: group[0]?.personnelId ?? businessKey, personnelName: name,
         kind, aspects, areaId, recordIds, diffFields: analysis.diffFields, dates, rowNumbers, reason,
+        currentMasterFields: prior ? storedToFields(prior) : null,
         candidate, status, resolution,
         createdAt: previous?.createdAt ?? options.now, updatedAt: options.now,
       }
@@ -212,24 +218,13 @@ export const reconcile = (
         `ID ${group[0]?.personnelId} memiliki NoKTP lengkap berbeda (${analysis.conflictingKtps.join(' vs ')}). Tidak digabung otomatis.`,
         [], { label: 'Konflik identitas — perlu peninjauan', note: 'Jangan gabungkan tanpa kebijakan bisnis.' },
         'PENDING', null)
-    } else if (route === 'AUTO') {
-      const ev = analysis.autoConfirmable!
-      emitReview('PLACEMENT_CHANGE', analysis.aspects.map((a) => a.kind),
-        'Perubahan penempatan dengan kronologi jelas (auto-confirmed dari Import Excel).',
-        mergeDates(analysis.aspects.map((a) => a.dates)),
-        { label: 'Perubahan penempatan', movementType: ev.movementType, note: ev.note },
-        'CONFIRMED',
-        { decisionKind: 'PLACEMENT_CHANGE', movementType: ev.movementType, effectiveDate: ev.effectiveDate, beforeRecordId: ev.beforeRecordId, afterRecordId: ev.afterRecordId, note: ev.note, reviewedBy: 'IMPORT_AUTO', reviewedAt: options.now, decisionVersion: 1 })
-      // Only count as a brand-new confirmed event when it did not already exist.
-      const id = `rv:${businessKey}:PLACEMENT_CHANGE:${contentHash(distinctFingerprints)}`
-      if (!existingReviewById.has(id)) confirmedEvents++
     } else if (route === 'REVIEW') {
       const aspectKinds = analysis.aspects.map((a) => a.kind)
       if (aspectKinds.includes('PLACEMENT_CHANGE')) movementCandidates++
       if (aspectKinds.includes('EXIT') || aspectKinds.includes('REENTRY')) exitReentryCandidates++
       if (!aspectKinds.includes('PLACEMENT_CHANGE') && !aspectKinds.includes('EXIT') && !aspectKinds.includes('REENTRY')) ambiguousCases++
-      emitReview(analysis.primaryKind, aspectKinds,
-        analysis.aspects.map((a) => a.reason).join(' '),
+      emitReview(unknownPlacement && aspectKinds.length === 0 ? 'UNDETERMINED' : analysis.primaryKind, unknownPlacement && aspectKinds.length === 0 ? ['UNDETERMINED'] : aspectKinds,
+        unknownPlacement && aspectKinds.length === 0 ? 'Area atau Project belum dikenal pada master referensi. Perlu pemetaan manual.' : analysis.aspects.map((a) => a.reason).join(' '),
         mergeDates(analysis.aspects.map((a) => a.dates)),
         { label: analysis.aspects[0]?.candidateNote ?? 'Perlu ditinjau', note: analysis.aspects.map((a) => a.candidateNote).join(' ') },
         'PENDING', null)
@@ -240,9 +235,10 @@ export const reconcile = (
   // Pending review items after this run = those emitted as PENDING + previously-stored
   // pending ones not re-touched this run.
   const touchedIds = new Set(reviewItemsToPut.map((r) => r.id))
+  const isPending = (item: ReviewItem) => item.status === 'PENDING' || item.status === 'KEPT_PENDING'
   const pendingReviewItems =
-    reviewItemsToPut.filter((r) => r.status === 'PENDING').length +
-    existing.reviewItems.filter((r) => r.status === 'PENDING' && !touchedIds.has(r.id)).length
+    reviewItemsToPut.filter(isPending).length +
+    existing.reviewItems.filter((r) => isPending(r) && !touchedIds.has(r.id)).length
 
   const summary: ImportSummary = {
     fileName: options.fileName,
@@ -263,7 +259,9 @@ export const reconcile = (
     pendingReviewItems,
   }
   const status: ImportBatchStatus =
-    exceptions.length > 0 ? 'COMPLETED_WITH_EXCEPTIONS' : warningRows > 0 ? 'COMPLETED_WITH_WARNINGS' : 'COMPLETED'
+    exceptions.length > 0 ? 'COMPLETED_WITH_EXCEPTIONS'
+      : pendingReviewItems > 0 ? 'COMPLETED_WITH_REVIEW'
+        : warningRows > 0 ? 'COMPLETED_WITH_WARNINGS' : 'COMPLETED'
   const batch: ImportBatch = {
     id: options.batchId, fileName: options.fileName, sheetName: options.sheetName, status, summary, createdAt: options.now,
   }

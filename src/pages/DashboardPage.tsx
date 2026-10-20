@@ -7,25 +7,27 @@ import { StatusBadge } from '../components/StatusBadge'
 import { replacementTone } from '../components/statusTones'
 import { allowedAreaIds } from '../config/access'
 import { useDemo } from '../context/DemoContext'
-import { areas, demoUsers, positions } from '../data/demoData'
+import { demoUsers, positions } from '../data/demoData'
 import { formatDate, replacementLabels } from '../lib/businessRules'
 import { selectDashboardData, type DashboardFilters } from '../lib/dashboardRules'
 import type { ReplacementNeed } from '../types'
 import { DEMO_TODAY, getContractReminders, type ContractReminderCategory } from '../lib/contractRules'
 import { terminology as term } from '../config/terminology'
+import { EmptyState } from '../components/EmptyState'
 
 type DrillKey = 'ACTIVE' | 'EXITS' | 'FULFILLED' | 'OPEN' | 'OVER_SLA' | 'CONTRACT' | null
 
 export function DashboardPage() {
-  const { currentUser, employees, employeeExits, replacementNeeds, employeeMovements, permissionConfig, projects } = useDemo()
+  const { currentUser, areas, employees, employeeExits, replacementNeeds, employeeMovements, permissionConfig, projects, importStorageReady, dataMode } = useDemo()
   const user = currentUser ?? demoUsers[0]
   const allowedAreas = allowedAreaIds(user, permissionConfig)
   const lockedArea = allowedAreas?.length === 1 ? allowedAreas[0] : ''
-  const [filters, setFilters] = useState<DashboardFilters>({ dateFrom: '2026-08-01', dateTo: '2026-09-30', areaId: lockedArea, projectId: '', position: '', status: '' })
+  const [filters, setFilters] = useState<DashboardFilters>({ dateFrom: '2000-01-01', dateTo: '2099-12-31', areaId: lockedArea, projectId: '', position: '', status: '' })
   const [drill, setDrill] = useState<DrillKey>(null)
   const allowedEmployees = useMemo(() => employees.filter((employee) => allowedAreas === null || Boolean(employee.areaId && allowedAreas.includes(employee.areaId))), [allowedAreas, employees])
   const data = useMemo(() => selectDashboardData(allowedEmployees, employeeExits, replacementNeeds.filter((need) => allowedAreas === null || Boolean(need.areaId && allowedAreas.includes(need.areaId))), employeeMovements, filters), [allowedAreas, allowedEmployees, employeeExits, employeeMovements, filters, replacementNeeds])
-  const contractReminders = useMemo(() => getContractReminders(data.employees), [data.employees])
+  const referenceDate = dataMode === 'SAMPLE' ? DEMO_TODAY : new Date().toISOString().slice(0, 10)
+  const contractReminders = useMemo(() => getContractReminders(data.employees, referenceDate), [data.employees, referenceDate])
   const update = (key: keyof DashboardFilters, value: string) => setFilters((current) => ({ ...current, [key]: value, ...(key === 'areaId' ? { projectId: '' } : {}) }))
   const kpis: Array<{ key: DrillKey; label: string; value: string | number; note: string; tone: string; icon: typeof Users }> = [
     { key: 'ACTIVE', label: 'Active Employee', value: data.activeEmployees.length, note: 'Aktif dan tervalidasi', tone: 'positive', icon: Users },
@@ -35,7 +37,7 @@ export function DashboardPage() {
     { key: 'OVER_SLA', label: term.overSla, value: data.overSla.length, note: 'Lebih dari 3 hari kerja', tone: 'danger', icon: Gauge },
     { key: null, label: 'Fulfillment Rate', value: `${data.fulfillmentRate}%`, note: 'Completed / all needs', tone: 'positive', icon: Gauge },
     { key: null, label: 'Average Gap', value: `${data.averageGap.toFixed(1)} hari`, note: 'Working-day gap', tone: 'neutral', icon: Activity },
-    { key: 'CONTRACT', label: 'Contract Expiring Soon', value: contractReminders.length, note: `Per ${formatDate(DEMO_TODAY)}`, tone: 'warning', icon: CalendarClock },
+    { key: 'CONTRACT', label: 'Contract Expiring Soon', value: contractReminders.length, note: `Per ${formatDate(referenceDate)}`, tone: 'warning', icon: CalendarClock },
   ]
   const chartAreas = areas.filter((area) => allowedAreas === null || allowedAreas.includes(area.id))
   const turnoverArea = chartAreas.map((area) => ({ name: area.name, exits: data.exits.filter((exit) => employees.find((employee) => employee.id === exit.employeeId)?.areaId === area.id).length, needs: 0, fulfilled: 0, gap: 0 }))
@@ -44,11 +46,15 @@ export function DashboardPage() {
   const gapArea = chartAreas.map((area) => { const values = data.fulfilled.filter((need) => need.areaId === area.id && need.gapWorkingDays !== null).map((need) => need.gapWorkingDays ?? 0); return { name: area.name, exits: 0, needs: 0, fulfilled: 0, gap: values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1)) : 0 } })
   const drillNeeds: ReplacementNeed[] = drill === 'FULFILLED' ? data.fulfilled : drill === 'OPEN' ? data.open : drill === 'OVER_SLA' ? data.overSla : []
   const drillTitle = kpis.find((item) => item.key === drill)?.label ?? ''
+  if (importStorageReady && employees.length === 0) return <>
+    <PageHeader eyebrow="WORKFORCE OVERVIEW" title={`Selamat datang, ${user.name.split(' ')[0]}`} description="Dashboard menggunakan data import dan transaksi yang tersedia di browser ini." />
+    <EmptyState title="Belum ada data workforce" description="Import file .xlsx melalui menu Import Excel. KPI, chart, dan analytics tidak menampilkan data sintetis pada mode Import-Only." />
+  </>
   return <>
     <PageHeader eyebrow="WORKFORCE OVERVIEW" title={`Selamat datang, ${user.name.split(' ')[0]}`} description="Setiap KPI dapat dijelaskan hingga record sumbernya." />
     <section className="card dashboard-filters"><div><label>Periode mulai<input type="date" value={filters.dateFrom} onChange={(event) => update('dateFrom', event.target.value)} /></label><span className="date-separator">—</span><label>Sampai<input type="date" value={filters.dateTo} onChange={(event) => update('dateTo', event.target.value)} /></label></div><div><label>Area<select value={filters.areaId} disabled={Boolean(lockedArea)} onChange={(event) => update('areaId', event.target.value)}><option value="">Semua Area</option>{chartAreas.map((area) => <option value={area.id} key={area.id}>{area.name}</option>)}</select></label><label>Project<select value={filters.projectId} onChange={(event) => update('projectId', event.target.value)}><option value="">Semua Project</option>{projects.filter((project) => (!filters.areaId || project.areaId === filters.areaId) && chartAreas.some((area) => area.id === project.areaId)).map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label>Position<select value={filters.position} onChange={(event) => update('position', event.target.value)}><option value="">Semua Position</option>{positions.map((position) => <option key={position}>{position}</option>)}</select></label><label>Status<select value={filters.status} onChange={(event) => update('status', event.target.value)}><option value="">Semua Status</option>{Object.entries(replacementLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></div></section>
     <div className="kpi-grid">{kpis.map(({ key, label, value, note, tone, icon: Icon }) => <button type="button" className={`card kpi-card ${tone} ${key ? 'clickable' : ''}`} key={label} onClick={() => key && setDrill(key)}><div className="kpi-top"><span className="kpi-icon"><Icon /></span>{key && <small>Lihat data</small>}</div><strong>{value}</strong><h3>{label}</h3><p>{note}</p></button>)}</div>
-    <p className="target-fulfillment">Target Fulfillment: ≤ 3 working days <span>· Demo assumption</span> · <Link to="/projects">Project drill-down</Link> · <Link to="/reports/analytics">Monthly Summary</Link></p>
+    <p className="target-fulfillment">Target Fulfillment: ≤ 3 working days <span>· Demo assumption: historical exit dan replacement diestimasi dari master import</span> · <Link to="/projects">Project drill-down</Link> · <Link to="/reports/analytics">Monthly Summary</Link></p>
     <section className="card contract-reminder"><div className="chart-heading"><div><h2>Kontrak Mendekati Berakhir</h2><p>Informasi berdasarkan fixed demo date {formatDate(DEMO_TODAY)}.</p></div><span>INFORMATIONAL ONLY</span></div><div className="contract-categories">{(['D-30', 'D-14', 'D-7', 'EXPIRED'] as ContractReminderCategory[]).map((category) => <button key={category} onClick={() => setDrill('CONTRACT')}><span>{category === 'EXPIRED' ? 'Expired' : category}</span><strong>{contractReminders.filter((item) => item.category === category).length}</strong><small>{category === 'EXPIRED' ? 'Sudah berakhir' : 'Perlu perhatian'}</small></button>)}</div></section>
     <div className="charts-grid analytics-grid">{[
       { title: 'Turnover by Area', note: 'Validated exit', data: turnoverArea, bars: [['exits', 'Turnover', '#173f5f']] },

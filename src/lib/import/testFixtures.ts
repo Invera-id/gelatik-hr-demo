@@ -14,7 +14,11 @@ export const TEMPLATE_HEADER_ROW: string[] = COLUMN_TEMPLATE.map((c) => c.header
 /** Build one 83-wide data row, placing values at the right column for each field key. */
 export const buildRow = (values: Record<string, unknown>): unknown[] => {
   const row: unknown[] = new Array(COLUMN_TEMPLATE.length).fill(null)
-  for (const [field, value] of Object.entries(values)) {
+  const withSyntheticCriticalDefaults = Object.keys(values).length ? {
+    areaCbs: 'MAKASSAR', projectName: 'NKP MT REGULER', position: 'SALES', joinDate: '2025-01-02',
+    ...values,
+  } : values
+  for (const [field, value] of Object.entries(withSyntheticCriticalDefaults)) {
     const index = FIELD_TO_INDEX.get(field)
     if (index === undefined) throw new Error(`Unknown fixture field: ${field}`)
     row[index] = value
@@ -79,6 +83,15 @@ export class InMemoryPersonnelRepository implements PersonnelRepository {
     this.reviews.set(id, updated)
     return updated
   }
+  async resolveReviewAndPatch(id: string, businessKey: string, status: ReviewStatus, resolution: ReviewResolution, patch: Partial<StoredPersonnel['employee']>): Promise<ReviewItem | null> {
+    const current = this.reviews.get(id)
+    const master = this.personnel.get(businessKey)
+    if (!current || !master) return null
+    const updated = { ...current, status, resolution, updatedAt: new Date().toISOString() }
+    this.reviews.set(id, updated)
+    this.personnel.set(businessKey, { ...master, employee: { ...master.employee, ...patch } })
+    return updated
+  }
   async isSeeded(): Promise<boolean> {
     return this.seeded
   }
@@ -97,6 +110,16 @@ export class InMemoryPersonnelRepository implements PersonnelRepository {
       }
     }
     return false
+  }
+  async patchEmployees(employeeIds: string[], patch: Partial<StoredPersonnel['employee']>): Promise<number> {
+    const wanted = new Set(employeeIds)
+    let updated = 0
+    for (const [key, record] of this.personnel) {
+      if (!wanted.has(record.employee.id)) continue
+      this.personnel.set(key, { ...record, employee: { ...record.employee, ...patch } })
+      updated++
+    }
+    return updated
   }
   async clearAll(): Promise<void> {
     this.personnel.clear()

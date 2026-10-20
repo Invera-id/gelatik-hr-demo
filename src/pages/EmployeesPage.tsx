@@ -4,14 +4,14 @@ import { Link } from 'react-router-dom'
 import { PageHeader } from '../components/PageHeader'
 import { StatusBadge } from '../components/StatusBadge'
 import { useDemo } from '../context/DemoContext'
-import { areas, demoUsers } from '../data/demoData'
+import { demoUsers } from '../data/demoData'
 import { allowedAreaIds, hasPermission } from '../config/access'
 import { formatDate, filterEmployeesForUser } from '../lib/businessRules'
 import { getActiveEmployees, latestValidatedExit } from '../lib/employeeViews'
 import { terminology as term } from '../config/terminology'
 
 export function EmployeesPage() {
-  const { currentUser, employees, employeeExits, permissionConfig, projects } = useDemo()
+  const { currentUser, areas, employees, employeeExits, permissionConfig, projects } = useDemo()
   const user = currentUser ?? demoUsers[0]
   const scopedAreas = allowedAreaIds(user, permissionConfig)
   const [view, setView] = useState<'ALL' | 'ACTIVE'>('ALL')

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseWorkbook } from './parse'
-import { runImport } from './service'
+import { commitPreparedImport, prepareImport, runImport } from './service'
 import { selectDatabaseSheet } from './workbook'
 import { ImportAbortError } from './types'
 import {
@@ -57,6 +57,28 @@ describe('sheet selection (Database only)', () => {
 })
 
 describe('column mapping', () => {
+  it('maps reordered headers by name instead of applying positional drift', () => {
+    const sheet = buildSheet('Database', [personRow()])
+    const header = [...sheet.rows[0]]
+    const data = [...sheet.rows[1]]
+    ;[header[1], header[2]] = [header[2], header[1]]
+    ;[data[1], data[2]] = [data[2], data[1]]
+    const parsed = parseWorkbook([{ ...sheet, rows: [header, data] }])
+    expect(parsed.records[0].personnelId).toBe('ID-001')
+    expect(parsed.records[0].fields.areaCbs).toBe('MAKASSAR')
+    expect(parsed.records[0].warnings.some((warning) => warning.column === 'Struktur header')).toBe(false)
+  })
+
+  it('ignores inserted unknown columns and still maps known headers', () => {
+    const sheet = buildSheet('Database', [personRow()])
+    const header = [...sheet.rows[0]]
+    const data = [...sheet.rows[1]]
+    header.splice(3, 0, 'Kolom Tambahan')
+    data.splice(3, 0, 'DIABAIKAN')
+    const parsed = parseWorkbook([{ ...sheet, rows: [header, data] }])
+    expect(parsed.records[0].personnelId).toBe('ID-001')
+    expect(parsed.records[0].name).toBe('TIARA DWI AMALIA')
+  })
   it('keeps KTP and domicile addresses separate', () => {
     const sheets = [buildSheet('Database', [personRow({
       ktpAddress: 'JL KTP 1', ktpRt: '001', ktpCity: 'MAKASSAR',
@@ -241,5 +263,68 @@ describe('runImport service', () => {
     })
     expect(result.ok).toBe(false)
     expect(result.error).toMatch(/melebihi batas/)
+  })
+
+  it('previews without persistence, then commits only after confirmation', async () => {
+    const repo = new InMemoryPersonnelRepository()
+    const options = {
+      file: fakeFile(), repository: repo, areas: testAreas, projects: testProjects, createdBy: 'user-hr',
+      readWorkbook: async () => [buildSheet('Database', [personRow({ personnelId: 'PREVIEW-1' })])],
+    }
+    const preview = await prepareImport(options)
+    expect(preview.ok).toBe(true)
+    expect(await repo.getAllPersonnel()).toHaveLength(0)
+    const committed = await commitPreparedImport(preview.prepared!, repo)
+    expect(committed.ok).toBe(true)
+    expect(await repo.getAllPersonnel()).toHaveLength(1)
+  })
+
+  it('discovers Area and Project references from workbook rows in import-only mode', async () => {
+    const repo = new InMemoryPersonnelRepository()
+    const preview = await prepareImport({
+      file: fakeFile(), repository: repo, areas: [], projects: [], createdBy: 'user-hr',
+      readWorkbook: async () => [buildSheet('Database', [personRow({
+        personnelId: 'REF-001', areaCbs: 'AREA CONTOH', projectName: 'PROJECT CONTOH',
+        clientName: 'CLIENT CONTOH', position: 'PROMOTOR', joinDate: '2026-01-01',
+      })])],
+    })
+    expect(preview.ok).toBe(true)
+    expect(preview.prepared?.discoveredAreas).toHaveLength(1)
+    expect(preview.prepared?.discoveredProjects).toHaveLength(1)
+    expect(preview.prepared?.plan.summary.pendingReviewItems).toBe(0)
+    expect(preview.prepared?.plan.mastersToPut[0].employee.areaId).toMatch(/^import-area-/)
+    expect(preview.prepared?.plan.mastersToPut[0].employee.projectId).toMatch(/^import-project-/)
+  })
+
+  it('keeps equal Project names in different Areas as separate references', async () => {
+    const repo = new InMemoryPersonnelRepository()
+    const preview = await prepareImport({
+      file: fakeFile(), repository: repo, areas: [], projects: [], createdBy: 'user-hr',
+      readWorkbook: async () => [buildSheet('Database', [
+        personRow({ personnelId: 'REF-A', areaCbs: 'AREA A', projectName: 'PROJECT BERSAMA' }),
+        personRow({ personnelId: 'REF-B', areaCbs: 'AREA B', projectName: 'PROJECT BERSAMA' }),
+      ])],
+    })
+    expect(preview.prepared?.discoveredAreas).toHaveLength(2)
+    expect(preview.prepared?.discoveredProjects).toHaveLength(2)
+    const projectIds = preview.prepared?.plan.mastersToPut.map((master) => master.employee.projectId)
+    expect(new Set(projectIds).size).toBe(2)
+  })
+
+  it('rejects a stale prepared plan', async () => {
+    const repo = new InMemoryPersonnelRepository()
+    const options = { file: fakeFile(), repository: repo, areas: testAreas, projects: testProjects, createdBy: 'user-hr', readWorkbook: async () => [buildSheet('Database', [personRow()])] }
+    const preview = await prepareImport(options)
+    await runImport({ ...options, file: fakeFile('other.xlsx'), readWorkbook: async () => [buildSheet('Database', [personRow({ personnelId: 'OTHER' })])] })
+    const result = await commitPreparedImport(preview.prepared!, repo)
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/kedaluwarsa/)
+  })
+
+  it('rejects legacy .xls before reading it', async () => {
+    const repo = new InMemoryPersonnelRepository()
+    const result = await prepareImport({ file: fakeFile('legacy.xls'), repository: repo, areas: testAreas, projects: testProjects, createdBy: 'user-hr', readWorkbook: async () => { throw new Error('must not read') } })
+    expect(result.ok).toBe(false)
+    expect(result.error).toMatch(/tidak didukung/)
   })
 })

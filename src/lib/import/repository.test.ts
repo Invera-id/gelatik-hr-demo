@@ -71,4 +71,21 @@ describe('IndexedDbPersonnelRepository', () => {
     await repo.commit(makePlan([person({ personnelId: 'ID-1', position: 'SALES' })], 'b2', existing))
     expect(await repo.getAllPersonnel()).toHaveLength(1)
   })
+
+  it('validates several imported employees in one bulk update', async () => {
+    const repo = new IndexedDbPersonnelRepository()
+    await repo.commit(makePlan([
+      person({ personnelId: 'BULK-1' }),
+      person({ personnelId: 'BULK-2' }),
+      person({ personnelId: 'BULK-3' }),
+    ], 'bulk'))
+    const before = await repo.getAllPersonnel()
+    const count = await repo.patchEmployees(before.slice(0, 2).map((item) => item.employee.id), {
+      validationStatus: 'VALIDATED', validatedBy: 'user-hr', validatedAt: '2026-10-20T00:00:00.000Z',
+    })
+    expect(count).toBe(2)
+    const after = await repo.getAllPersonnel()
+    expect(after.filter((item) => item.employee.validationStatus === 'VALIDATED')).toHaveLength(2)
+    expect(after.filter((item) => item.employee.validationStatus !== 'VALIDATED')).toHaveLength(1)
+  })
 })

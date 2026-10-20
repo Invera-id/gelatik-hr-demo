@@ -22,10 +22,6 @@ export const contractLabels = {
   NOT_AVAILABLE: 'Belum tersedia', DRAFT: 'Draft', SIGNED: 'Ditandatangani',
 } as const
 
-export const canEditEmployees = (user: DemoUser) => !['MANAGEMENT', 'OPERATIONS_MANAGER'].includes(user.role)
-export const canValidate = (user: DemoUser) => ['HR_HO', 'SUPER_ADMIN'].includes(user.role)
-export const canViewValidation = canValidate
-
 /** A person counts as active workforce only when their current condition is confirmed. */
 export const isCountableActive = (employee: Pick<Employee, 'employmentStatus' | 'conditionStatus'>) =>
   employee.employmentStatus === 'ACTIVE' && employee.conditionStatus !== 'NEEDS_REVIEW'
@@ -35,20 +31,22 @@ export const conditionNeedsReview = (employee: Pick<Employee, 'conditionStatus'>
   employee.conditionStatus === 'NEEDS_REVIEW'
 
 /**
- * Who may act on an import review item: HR HO / Super Admin, within their allowed
- * area scope. Items with an unknown area are only actionable by all-area reviewers.
+ * Import review visibility and resolution are separate permissions. Both remain
+ * constrained by area scope; unknown-area items require all-area scope.
  */
-export const canReviewImportItem = (
+export const canViewImportReviewItem = (
   user: DemoUser,
   config: RolePermissionConfig[],
   item: { areaId: string | null },
 ): boolean => {
-  if (!['HR_HO', 'SUPER_ADMIN'].includes(user.role)) return false
-  if (!hasPermission(user, config, 'edit_employee')) return false
+  if (!hasPermission(user, config, 'view_import_review')) return false
   const areaIds = allowedAreaIds(user, config)
   if (areaIds === null) return true
   return Boolean(item.areaId && areaIds.includes(item.areaId))
 }
+
+export const canReviewImportItem = (user: DemoUser, config: RolePermissionConfig[], item: { areaId: string | null }) =>
+  hasPermission(user, config, 'resolve_import_review') && canViewImportReviewItem(user, config, item)
 
 export const canAccessEmployee = (user: DemoUser, employee: Employee, config?: RolePermissionConfig[]) => {
   if (!config) return user.role !== 'AREA_SUPPORT' || employee.areaId === user.areaId

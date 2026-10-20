@@ -27,7 +27,11 @@ export const validationRecipients = (
   actorId: string,
   ctx: AccessContext,
 ): string[] => {
-  const permission: Permission = transaction === 'EMPLOYEE_EXIT' ? 'validate_exit' : 'validate_employee'
+  const permission: Permission = transaction === 'EMPLOYEE_EXIT'
+    ? 'validate_employee_exit'
+    : transaction === 'EMPLOYEE_PLACEMENT_CHANGE'
+      ? 'validate_placement_change'
+      : 'validate_employee_entry_edit'
   return ctx.users
     .filter((user) => user.id !== actorId)
     .filter((user) => hasPermission(user, ctx.permissionConfig, permission))

@@ -141,6 +141,8 @@ export interface ReviewItem {
   /** Area the person currently sits in, for review scope checks. */
   areaId: string | null
   recordIds: string[]
+  /** Snapshot of the actual current master; never masquerades as a source row. */
+  currentMasterFields?: Record<string, string | null> | null
   diffFields: string[]
   dates: ReviewDateFact[]
   rowNumbers: number[]
@@ -180,6 +182,7 @@ export interface ImportException {
 /** Final per-run status. */
 export type ImportBatchStatus =
   | 'COMPLETED'
+  | 'COMPLETED_WITH_REVIEW'
   | 'COMPLETED_WITH_WARNINGS'
   | 'COMPLETED_WITH_EXCEPTIONS'
   | 'FAILED'
@@ -210,6 +213,8 @@ export interface ImportSummary {
   /** Rows carrying at least one normalization warning. */
   warningRows: number
   exceptionRows: number
+  /** Rows excluded before reconciliation because they are outside the importer's Area scope. */
+  outOfScopeRows?: number
   blankRowsSkipped: number
   /** Total review items pending after this run. */
   pendingReviewItems: number

@@ -3,7 +3,36 @@ export type ValidationStatus = 'DRAFT' | 'SUBMITTED' | 'VALIDATED' | 'REVISION_R
 export type ContractStatus = 'NOT_AVAILABLE' | 'DRAFT' | 'SIGNED'
 export type EmploymentStatus = 'ACTIVE' | 'INACTIVE'
 export type ReplacementStatus = 'OPEN' | 'MATCHED' | 'FULFILLED' | 'OVER_TARGET'
-export type Permission = 'view_dashboard' | 'view_employee' | 'create_employee' | 'edit_employee' | 'create_exit' | 'validate_employee' | 'validate_exit' | 'view_replacement' | 'match_replacement' | 'fulfill_replacement' | 'export_data' | 'manage_users' | 'manage_roles'
+export type Permission =
+  | 'view_dashboard'
+  | 'view_analytics'
+  | 'view_notifications'
+  | 'view_employee'
+  | 'create_employee'
+  | 'edit_employee_basic'
+  | 'request_placement_change'
+  | 'request_employee_exit'
+  | 'reentry_employee'
+  | 'manage_employee_notes_flags'
+  | 'view_movement_history'
+  | 'import_personnel'
+  | 'view_import_review'
+  | 'resolve_import_review'
+  | 'export_data'
+  | 'validate_employee_entry_edit'
+  | 'validate_placement_change'
+  | 'validate_employee_exit'
+  | 'bulk_validate'
+  | 'view_replacement'
+  | 'match_replacement'
+  | 'fulfill_replacement'
+  | 'view_project'
+  | 'manage_project'
+  | 'toggle_project_status'
+  | 'manage_project_quota'
+  | 'manage_roles'
+  | 'manage_validation_policy'
+  | 'reset_demo_data'
 export type ScopeType = 'OWN_AREA' | 'SELECTED_AREAS' | 'ALL_AREAS'
 export type TransactionType = 'EMPLOYEE_ENTRY' | 'EMPLOYEE_BASIC_EDIT' | 'EMPLOYEE_PLACEMENT_CHANGE' | 'EMPLOYEE_EXIT'
 export type ValidatorAuthority = 'AREA_ADMIN' | 'HR_HO' | 'BOTH'
@@ -254,6 +283,7 @@ export interface EmployeeMovement {
 }
 
 export interface DemoData {
+  areas: Area[]
   projects: Project[]
   projectQuotas: ProjectQuota[]
   employees: Employee[]

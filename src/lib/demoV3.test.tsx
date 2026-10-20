@@ -6,17 +6,23 @@ import { DashboardPage } from '../pages/DashboardPage'
 import { ProjectsPage } from '../pages/ProjectsPage'
 import { ProjectDetailPage } from '../pages/ProjectDetailPage'
 import { AnalyticsPage } from '../pages/AnalyticsPage'
+import { ValidationPage } from '../pages/ValidationPage'
 import { createInitialData } from '../data/demoData'
 import { employeeFieldGroups } from '../config/employeeDictionary'
 import { getActiveEmployees } from './employeeViews'
+import { dataStorageKey } from '../config/dataMode'
 import { selectDashboardData } from './dashboardRules'
-import { filterProjects, getMonthlySummary, getProjectMetrics, getTerminationRows, monthlyIndex, turnoverRate } from './projectAnalytics'
+import { filterProjects, getMonthlySummary, getProjectMetrics, getTerminationRows, getTerminationSummaryRows, monthlyIndex, turnoverRate } from './projectAnalytics'
 
 const data = createInitialData()
 const filters = { dateFrom: '2026-08-01', dateTo: '2026-09-30', areaId: '', projectId: '', position: '', status: '' }
 
 describe('V3 dashboard terminology and source', () => {
-  beforeEach(() => { localStorage.clear(); sessionStorage.setItem('gelatik-demo-user-v1', 'user-operations') })
+  beforeEach(() => {
+    localStorage.clear()
+    localStorage.setItem(dataStorageKey, JSON.stringify(data))
+    sessionStorage.setItem('gelatik-demo-user-v1', 'user-operations')
+  })
 
   it('renders Turnover and Vacant without the Replacement Needs KPI, plus the 3-day target', () => {
     const html = renderToStaticMarkup(<MemoryRouter><DemoProvider><DashboardPage /></DemoProvider></MemoryRouter>)
@@ -43,6 +49,14 @@ describe('V3 dashboard terminology and source', () => {
     const html = renderToStaticMarkup(<MemoryRouter><DemoProvider><AnalyticsPage /></DemoProvider></MemoryRouter>)
     expect(html).toContain('Monthly Client Summary')
     expect(html).toContain('Pengakhiran Perjanjian')
+  })
+
+  it('gives HR a bulk validation action and employee detail links', () => {
+    sessionStorage.setItem('gelatik-demo-user-v1', 'user-hr')
+    const html = renderToStaticMarkup(<MemoryRouter><DemoProvider><ValidationPage /></DemoProvider></MemoryRouter>)
+    expect(html).toContain('Validasi Semua')
+    expect(html).toContain('Lihat Detail')
+    expect(html).toContain('/employees/')
   })
 })
 
@@ -103,6 +117,60 @@ describe('V3 calculated analytics', () => {
     expect(monthlyIndex(2, 4)).toBe(100)
   })
 
+  it('derives quota from unique confirmed master personnel at the start of the month', () => {
+    const project = data.projects.find((item) => item.id === 'project-alpha-bandung')!
+    const metric = getProjectMetrics({ ...data, projectQuotas: [] }, project, '2026-09')
+    const expectedQuota = data.employees.filter((employee) => employee.projectId === project.id
+      && employee.validationStatus === 'VALIDATED'
+      && employee.conditionStatus !== 'NEEDS_REVIEW'
+      && !data.employeeExits.some((exit) => exit.employeeId === employee.id
+        && exit.validationStatus === 'VALIDATED'
+        && exit.exitDate < '2026-09-01')).length
+
+    expect(metric.quotaSource).toBe('MASTER_COUNT')
+    expect(metric.quota).toBe(expectedQuota)
+    expect(metric.turnoverRate).toBe(turnoverRate(metric.turnover, metric.quota))
+  })
+
+  it('keeps template-derived quota independent from legacy manual quota records', () => {
+    const project = data.projects[0]
+    const source = {
+      ...data,
+      projectQuotas: [{ id: 'quota-test', projectId: project.id, period: '2026-10', quota: 123 }],
+    }
+    const metric = getProjectMetrics(source, project, '2026-10')
+    const withoutLegacyQuota = getProjectMetrics({ ...source, projectQuotas: [] }, project, '2026-10')
+
+    expect(metric.quotaSource).toBe('MASTER_COUNT')
+    expect(metric.quota).toBe(withoutLegacyQuota.quota)
+  })
+
+  it('reconciles the template roll-forward: next quota excludes prior-month turnover', () => {
+    const project = data.projects[0]
+    const employees = data.employees.slice(0, 3).map((employee, index) => ({
+      ...employee,
+      id: `template-person-${index + 1}`,
+      projectId: project.id,
+      validationStatus: 'VALIDATED' as const,
+      conditionStatus: 'CONFIRMED' as const,
+      joinDate: index === 2 ? '2026-09-10' : '2026-08-10',
+    }))
+    const employeeExits = [
+      { ...data.employeeExits[0], id: 'template-exit-aug', employeeId: employees[0].id, exitDate: '2026-08-20', validationStatus: 'VALIDATED' as const },
+      { ...data.employeeExits[0], id: 'template-exit-sep', employeeId: employees[1].id, exitDate: '2026-09-20', validationStatus: 'VALIDATED' as const },
+    ]
+    const source = { ...data, employees, employeeExits, replacementNeeds: [], projectQuotas: [] }
+    const august = getProjectMetrics(source, project, '2026-08')
+    const september = getProjectMetrics(source, project, '2026-09')
+
+    expect(august.quota).toBe(3)
+    expect(august.turnover).toBe(1)
+    expect(september.quota).toBe(2)
+    expect(september.turnover).toBe(1)
+    expect(september.newHire).toBe(1)
+    expect(september.turnoverRate).toBe(50)
+  })
+
   it('aggregates monthly client summary from project metrics', () => {
     const rows = getMonthlySummary(data, data.projects, '2026-08', '2026-09')
     const arunika = rows.find((row) => row.clientName === 'PT Arunika Niaga')!
@@ -117,6 +185,27 @@ describe('V3 calculated analytics', () => {
     expect(selected).toHaveLength(1)
     const row = getTerminationRows(data, selected)[0]
     expect(row.yes.length + row.no.length + row.notSet.length).toBe(row.total)
-    expect(row.total).toBe(data.employees.filter((employee) => employee.projectId === project.id).length)
+    expect(row.total).toBe(data.employees.filter((employee) => employee.projectId === project.id && employee.validationStatus === 'VALIDATED' && employee.conditionStatus !== 'NEEDS_REVIEW').length)
+  })
+
+  it('groups termination summary by area, sub area, and client like the Excel pivot', () => {
+    const project = data.projects[0]
+    const employees = data.employees.slice(0, 3).map((employee, index) => ({
+      ...employee,
+      id: `termination-person-${index}`,
+      areaId: project.areaId,
+      projectId: project.id,
+      subArea: index === 2 ? 'SUB AREA B' : 'SUB AREA A',
+      validationStatus: 'VALIDATED' as const,
+      conditionStatus: 'CONFIRMED' as const,
+      profile: { ...employee.profile, agreementTermination: index === 0 ? 'YA' as const : index === 1 ? 'TIDAK' as const : null },
+    }))
+    const rows = getTerminationSummaryRows({ ...data, employees }, [project])
+
+    expect(rows).toHaveLength(2)
+    expect(rows.find((row) => row.subArea === 'SUB AREA A')).toMatchObject({ total: 2 })
+    expect(rows.find((row) => row.subArea === 'SUB AREA A')?.yes).toHaveLength(1)
+    expect(rows.find((row) => row.subArea === 'SUB AREA A')?.no).toHaveLength(1)
+    expect(rows.find((row) => row.subArea === 'SUB AREA B')?.notSet).toHaveLength(1)
   })
 })

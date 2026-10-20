@@ -135,6 +135,7 @@ export const createInitialData = (): DemoData => {
   })
 
   return {
+    areas: areas.map((area) => ({ ...area })),
     projects: projects.map((project) => ({ ...project })),
     projectQuotas: projectQuotas.map((quota) => ({ ...quota })),
     permissionConfig: cloneDefaultPermissions(),
@@ -198,5 +199,24 @@ export const createInitialData = (): DemoData => {
     ],
   }
 }
+
+/** Empty transactional state for the default import-only build. Reference
+ * projects remain available solely for controlled placement mapping; no
+ * employee, KPI, movement, exit, replacement, contract, or quota is seeded. */
+export const createImportOnlyData = (): DemoData => ({
+  areas: [],
+  projects: [],
+  projectQuotas: [],
+  employees: [],
+  employeeExits: [],
+  replacementNeeds: [],
+  movements: [],
+  employeeMovements: [],
+  movementRequests: [],
+  employeeNotes: [],
+  employeeFlags: [],
+  permissionConfig: cloneDefaultPermissions(),
+  validationPolicy: { ...defaultValidationPolicy },
+})
 
 export const positions = ['Sales', 'SPG', 'Team Leader', 'Promotor', 'Admin']

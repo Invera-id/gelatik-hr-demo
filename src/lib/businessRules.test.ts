@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { demoReducer, type DemoState } from '../context/DemoContext'
 import { createInitialData, demoUsers } from '../data/demoData'
+import { hasPermission } from '../config/access'
 import {
   calculateWorkingDayGap,
   canAccessEmployee,
-  canEditEmployees,
   filterEmployeesForUser,
   getCandidateEligibility,
   getFulfillmentBlockers,
@@ -27,7 +27,7 @@ describe('role and area access', () => {
   })
 
   it('prevents Management from editing employees', () => {
-    expect(canEditEmployees(management)).toBe(false)
+    expect(hasPermission(management, data.permissionConfig, 'edit_employee_basic')).toBe(false)
   })
 })
 

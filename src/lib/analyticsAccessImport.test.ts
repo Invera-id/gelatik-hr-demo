@@ -35,20 +35,20 @@ describe('configurable demo access and validation', () => {
   it('keeps Operations Manager read-only', () => {
     const user = demoUsers.find((item) => item.role === 'OPERATIONS_MANAGER')!
     expect(hasPermission(user, data.permissionConfig, 'view_dashboard')).toBe(true)
-    expect(hasPermission(user, data.permissionConfig, 'edit_employee')).toBe(false)
+    expect(hasPermission(user, data.permissionConfig, 'edit_employee_basic')).toBe(false)
     expect(hasPermission(user, data.permissionConfig, 'fulfill_replacement')).toBe(false)
   })
 
   it('keeps Management read-only', () => {
     const user = demoUsers.find((item) => item.role === 'MANAGEMENT')!
     expect(hasPermission(user, data.permissionConfig, 'view_replacement')).toBe(true)
-    expect(hasPermission(user, data.permissionConfig, 'create_exit')).toBe(false)
+    expect(hasPermission(user, data.permissionConfig, 'request_employee_exit')).toBe(false)
   })
 
   it('allows Super Admin to change the demo permission configuration', () => {
     const initial: DemoState = { ...data, currentUserId: 'user-superadmin' }
-    const result = demoReducer(initial, { type: 'TOGGLE_PERMISSION', role: 'OPERATIONS_MANAGER', permission: 'edit_employee' })
-    expect(result.permissionConfig.find((item) => item.role === 'OPERATIONS_MANAGER')?.permissions).toContain('edit_employee')
+    const result = demoReducer(initial, { type: 'TOGGLE_PERMISSION', role: 'OPERATIONS_MANAGER', permission: 'edit_employee_basic' })
+    expect(result.permissionConfig.find((item) => item.role === 'OPERATIONS_MANAGER')?.permissions).toContain('edit_employee_basic')
   })
 
   it('respects validation authority configuration', () => {

@@ -46,16 +46,16 @@ describe('reconcile — new personnel', () => {
     expect(plan.summary.confirmedEvents).toBe(0)
   })
 
-  it('a clear placement change auto-confirms an event (CONFIRMED review item) and keeps master CONFIRMED', () => {
+  it('routes even a clear placement change to manual review by default', () => {
     const plan = run([
       person({ areaCbs: 'MAKASSAR', position: 'SALES' }),
       person({ areaCbs: 'BANDUNG', position: 'SALES', mutationDate: '2026-03-01' }),
     ])
-    const confirmed = plan.reviewItemsToPut.filter((r) => r.status === 'CONFIRMED')
-    expect(confirmed).toHaveLength(1)
-    expect(confirmed[0].resolution?.movementType).toBe('AREA_CHANGE')
-    expect(plan.mastersToPut[0].employee.conditionStatus).toBe('CONFIRMED')
-    expect(plan.summary.confirmedEvents).toBe(1)
+    const pending = plan.reviewItemsToPut.filter((r) => r.status === 'PENDING')
+    expect(pending).toHaveLength(1)
+    expect(pending[0].aspects).toContain('PLACEMENT_CHANGE')
+    expect(plan.mastersToPut[0].employee.conditionStatus).toBe('NEEDS_REVIEW')
+    expect(plan.summary.confirmedEvents).toBe(0)
   })
 
   it('two different complete NoKTP for one ID becomes an identity-conflict review item, not an exception', () => {
@@ -85,10 +85,9 @@ describe('reconcile — re-import idempotency & conservatism', () => {
     ]
     const first = run(rows, emptyExisting(), 'b1')
     const second = run(rows, asExisting(first), 'b2')
-    const pendingIds = new Set(second.reviewItemsToPut.filter((r) => r.status === 'PENDING').map((r) => r.id))
-    expect(pendingIds.size).toBe(1)
-    // same deterministic id as the first run
-    expect([...pendingIds][0]).toBe(first.reviewItemsToPut.find((r) => r.status === 'PENDING')!.id)
+    expect(second.reviewItemsToPut).toHaveLength(0)
+    expect(second.summary.pendingReviewItems).toBe(1)
+    expect(first.reviewItemsToPut.filter((r) => r.status === 'PENDING')).toHaveLength(1)
   })
 
   it('(14) an older historical record does not overwrite a newer confirmed condition', () => {

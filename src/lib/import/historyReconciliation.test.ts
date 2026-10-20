@@ -93,9 +93,9 @@ describe('engine integration: confirm a reviewed movement → it appears on the 
       person({ personnelId: 'ID-9', areaCbs: 'MAKASSAR', position: 'SALES' }),
       person({ personnelId: 'ID-9', areaCbs: 'BANDUNG', position: 'SALES', mutationDate: '2026-05-01' }),
     ])
-    // This clear case auto-confirms; emulate the stored CONFIRMED item + its master id.
-    const confirmed = plan.reviewItemsToPut.filter((r) => r.status === 'CONFIRMED')
-    expect(confirmed).toHaveLength(1)
+    const pending = plan.reviewItemsToPut.find((r) => r.status === 'PENDING')!
+    const sourceIds = plan.sourceRecordsToPut.map((record) => record.id)
+    const confirmed = [{ ...pending, status: 'CONFIRMED' as const, resolution: { decisionKind: 'PLACEMENT_CHANGE' as const, movementType: 'AREA_CHANGE' as const, effectiveDate: '2026-05-01', beforeRecordId: sourceIds[0], afterRecordId: sourceIds[1], note: 'reviewed', reviewedBy: 'user-hr', reviewedAt: '2026-10-08T00:00:00.000Z', decisionVersion: 1 } }]
     const master = plan.mastersToPut.find((m) => m.businessKey === 'ID-9')!
     const events = deriveImportMovements(confirmed, plan.sourceRecordsToPut, {
       employeeIdByKey: new Map([['ID-9', master.employee.id]]), areas: testAreas, projects: testProjects,

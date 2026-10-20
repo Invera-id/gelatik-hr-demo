@@ -35,16 +35,6 @@ function PermissionRoute({ permission, children }: { permission: Permission | Pe
   return currentUser && required.some((item) => hasPermission(currentUser, permissionConfig, item)) ? children : <Navigate to="/dashboard" replace />
 }
 
-function SuperAdminRoute({ children }: { children: ReactNode }) {
-  const { currentUser } = useDemo()
-  return currentUser?.role === 'SUPER_ADMIN' ? children : <Navigate to="/dashboard" replace />
-}
-
-function ImportRoute({ children }: { children: ReactNode }) {
-  const { currentUser, permissionConfig } = useDemo()
-  return currentUser && ['HR_HO', 'SUPER_ADMIN'].includes(currentUser.role) && hasPermission(currentUser, permissionConfig, 'create_employee') ? children : <Navigate to="/dashboard" replace />
-}
-
 export default function App() {
   return <Routes>
     <Route path="/login" element={<LoginPage />} />
@@ -54,22 +44,22 @@ export default function App() {
       <Route path="employees" element={<PermissionRoute permission="view_employee"><EmployeesPage /></PermissionRoute>} />
       <Route path="employees/new" element={<PermissionRoute permission="create_employee"><EmployeeEntryPage /></PermissionRoute>} />
       <Route path="employees/:employeeId" element={<PermissionRoute permission="view_employee"><EmployeeDetailPage /></PermissionRoute>} />
-      <Route path="employees/:employeeId/edit" element={<PermissionRoute permission="edit_employee"><EmployeeEntryPage /></PermissionRoute>} />
-      <Route path="employees/:employeeId/exit" element={<PermissionRoute permission="create_exit"><EmployeeExitPage /></PermissionRoute>} />
-      <Route path="employees/:employeeId/movement" element={<PermissionRoute permission="edit_employee"><EmployeeMovementPage /></PermissionRoute>} />
-      <Route path="employees/:employeeId/reentry" element={<PermissionRoute permission="create_employee"><ReentryPage /></PermissionRoute>} />
-      <Route path="movements" element={<PermissionRoute permission="view_employee"><MovementHistoryPage /></PermissionRoute>} />
-      <Route path="projects" element={<PermissionRoute permission="view_employee"><ProjectsPage /></PermissionRoute>} />
-      <Route path="projects/:projectId" element={<PermissionRoute permission="view_employee"><ProjectDetailPage /></PermissionRoute>} />
-      <Route path="reports/analytics" element={<PermissionRoute permission="view_employee"><AnalyticsPage /></PermissionRoute>} />
-      <Route path="validation" element={<PermissionRoute permission={['validate_employee', 'validate_exit']}><ValidationPage /></PermissionRoute>} />
+      <Route path="employees/:employeeId/edit" element={<PermissionRoute permission="edit_employee_basic"><EmployeeEntryPage /></PermissionRoute>} />
+      <Route path="employees/:employeeId/exit" element={<PermissionRoute permission="request_employee_exit"><EmployeeExitPage /></PermissionRoute>} />
+      <Route path="employees/:employeeId/movement" element={<PermissionRoute permission="request_placement_change"><EmployeeMovementPage /></PermissionRoute>} />
+      <Route path="employees/:employeeId/reentry" element={<PermissionRoute permission="reentry_employee"><ReentryPage /></PermissionRoute>} />
+      <Route path="movements" element={<PermissionRoute permission="view_movement_history"><MovementHistoryPage /></PermissionRoute>} />
+      <Route path="projects" element={<PermissionRoute permission="view_project"><ProjectsPage /></PermissionRoute>} />
+      <Route path="projects/:projectId" element={<PermissionRoute permission="view_project"><ProjectDetailPage /></PermissionRoute>} />
+      <Route path="reports/analytics" element={<PermissionRoute permission="view_analytics"><AnalyticsPage /></PermissionRoute>} />
+      <Route path="validation" element={<PermissionRoute permission={['validate_employee_entry_edit', 'validate_placement_change', 'validate_employee_exit']}><ValidationPage /></PermissionRoute>} />
       <Route path="replacements" element={<PermissionRoute permission="view_replacement"><ReplacementsPage /></PermissionRoute>} />
       <Route path="replacements/:needId" element={<PermissionRoute permission="view_replacement"><ReplacementDetailPage /></PermissionRoute>} />
       <Route path="reports/export" element={<PermissionRoute permission="export_data"><ExportPage /></PermissionRoute>} />
-      <Route path="import" element={<ImportRoute><ImportPage /></ImportRoute>} />
-      <Route path="notifications" element={<NotificationsPage />} />
-      <Route path="settings/access" element={<SuperAdminRoute><AccessSettingsPage /></SuperAdminRoute>} />
-      <Route path="settings/validation" element={<SuperAdminRoute><AccessSettingsPage mode="validation" /></SuperAdminRoute>} />
+      <Route path="import" element={<PermissionRoute permission={['import_personnel', 'view_import_review']}><ImportPage /></PermissionRoute>} />
+      <Route path="notifications" element={<PermissionRoute permission="view_notifications"><NotificationsPage /></PermissionRoute>} />
+      <Route path="settings/access" element={<PermissionRoute permission="manage_roles"><AccessSettingsPage /></PermissionRoute>} />
+      <Route path="settings/validation" element={<PermissionRoute permission="manage_validation_policy"><AccessSettingsPage mode="validation" /></PermissionRoute>} />
     </Route>
     <Route path="*" element={<Navigate to="/dashboard" replace />} />
   </Routes>

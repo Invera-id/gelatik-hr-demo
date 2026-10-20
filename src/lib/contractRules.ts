@@ -5,7 +5,7 @@ export const DEMO_TODAY = '2026-09-14'
 export type ContractReminderCategory = 'D-30' | 'D-14' | 'D-7' | 'EXPIRED'
 
 export const getContractReminderCategory = (employee: Employee, today = DEMO_TODAY): ContractReminderCategory | null => {
-  if (!employee.contractEndDate || employee.employmentStatus !== 'ACTIVE' || employee.validationStatus !== 'VALIDATED') return null
+  if (!employee.contractEndDate || employee.employmentStatus !== 'ACTIVE' || employee.validationStatus !== 'VALIDATED' || employee.conditionStatus === 'NEEDS_REVIEW') return null
   const days = differenceInCalendarDays(parseISO(employee.contractEndDate), parseISO(today))
   if (days < 0) return 'EXPIRED'
   if (days <= 7) return 'D-7'

@@ -68,3 +68,25 @@ export const matchesTemplate = (normalizedHeaders: string[]): boolean => {
   if (trimmed.length !== TEMPLATE_COLUMN_COUNT) return false
   return TEMPLATE_HEADERS_NORMALIZED.every((expected, index) => trimmed[index] === expected)
 }
+
+/**
+ * Map each canonical template column to the matching source-column index.
+ * Repeated labels (Alamat, RT, RW, etc.) are matched by occurrence order, so a
+ * reordered or extended workbook can still be read without positional drift.
+ * Missing columns are returned as -1 and therefore normalize to null.
+ */
+export const createTemplateColumnMap = (normalizedHeaders: string[]): number[] => {
+  const sourceIndexes = new Map<string, number[]>()
+  normalizedHeaders.forEach((header, index) => {
+    if (!header) return
+    const indexes = sourceIndexes.get(header) ?? []
+    indexes.push(index)
+    sourceIndexes.set(header, indexes)
+  })
+  const occurrence = new Map<string, number>()
+  return TEMPLATE_HEADERS_NORMALIZED.map((header) => {
+    const seen = occurrence.get(header) ?? 0
+    occurrence.set(header, seen + 1)
+    return sourceIndexes.get(header)?.[seen] ?? -1
+  })
+}

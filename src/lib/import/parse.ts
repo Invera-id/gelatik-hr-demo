@@ -1,4 +1,4 @@
-import { locateHeaderRow, selectDatabaseSheet, type SheetTable } from './workbook'
+import { createTemplateColumnMap, locateHeaderRow, selectDatabaseSheet, type SheetTable } from './workbook'
 import { mapRow, type MappedRow } from './mapping'
 import { cleanText } from './normalizers'
 import { SIGNATURE_HEADERS } from './columns'
@@ -92,6 +92,7 @@ const looksLikeHeaderRepeat = (row: unknown[]): boolean => {
 export const parseWorkbook = (sheets: SheetTable[], date1904 = false): ParseResult => {
   const sheet = selectDatabaseSheet(sheets)
   const header = locateHeaderRow(sheet.rows)
+  const columnMap = header.matchesTemplate ? null : createTemplateColumnMap(header.headers)
 
   const records: ParsedSourceRecord[] = []
   const groups = new Map<string, ParsedSourceRecord[]>()
@@ -106,7 +107,10 @@ export const parseWorkbook = (sheets: SheetTable[], date1904 = false): ParseResu
     const row = sheet.rows[i] ?? []
     const rowNumber = i + 1 // Excel 1-based row number
 
-    const mapped = mapRow(row, rowNumber, date1904)
+    const canonicalRow = columnMap
+      ? columnMap.map((sourceIndex) => sourceIndex >= 0 ? row[sourceIndex] ?? null : null)
+      : row
+    const mapped = mapRow(canonicalRow, rowNumber, date1904)
     if (mapped.isBlank) {
       blankRowsSkipped++
       continue
@@ -117,13 +121,15 @@ export const parseWorkbook = (sheets: SheetTable[], date1904 = false): ParseResu
 
     const personnelId = mapped.fields.personnelId
     const name = mapped.fields.name
-    if (!personnelId || !name) {
-      const missing = [!personnelId ? 'ID Personil' : null, !name ? 'Nama' : null].filter(Boolean).join(' & ')
-      exceptions.push({ rowNumber, reason: `Identitas minimum tidak lengkap: ${missing} kosong.`, rawValues: mapped.rawValues })
+    const critical = [!personnelId ? 'ID Personil' : null, !name ? 'Nama' : null].filter(Boolean)
+    if (critical.length) {
+      exceptions.push({ rowNumber, reason: `Field kritikal belum lengkap: ${critical.join(', ')}.`, rawValues: mapped.rawValues })
       continue
     }
 
-    const businessKey = toBusinessKey(personnelId)
+    const validPersonnelId = personnelId as string
+    const validName = name as string
+    const businessKey = toBusinessKey(validPersonnelId)
     const fingerprint = businessFingerprint(mapped.fields)
     const dedupeKey = `${businessKey}:${fingerprint}`
     if (seenInFile.has(dedupeKey)) {
@@ -133,7 +139,7 @@ export const parseWorkbook = (sheets: SheetTable[], date1904 = false): ParseResu
     }
     seenInFile.add(dedupeKey)
 
-    const record: ParsedSourceRecord = { ...mapped, businessKey, personnelId, name, fingerprint }
+    const record: ParsedSourceRecord = { ...mapped, businessKey, personnelId: validPersonnelId, name: validName, fingerprint }
     records.push(record)
     const group = groups.get(businessKey)
     if (group) group.push(record)

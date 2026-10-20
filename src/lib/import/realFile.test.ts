@@ -1,74 +1,23 @@
-import 'fake-indexeddb/auto'
 import { describe, expect, it } from 'vitest'
+import { readWorkbookBrowser } from './service'
 import { parseWorkbook } from './parse'
-import { reconcile, emptyExisting } from './reconcile'
-import type { SheetTable } from './workbook'
-import { testAreas, testProjects } from './testFixtures'
+import { buildRow, TEMPLATE_HEADER_ROW } from './testFixtures'
 
-/**
- * Verification against the real demo workbook (3000 rows x 83 cols). It lives in the
- * user's Downloads folder, so each case no-ops when the file is absent (e.g. CI).
- */
-const REAL_FILE = '/Users/dzaky/Downloads/Demo_Personil_3000_Baris-2.xlsx'
-
-type LooseReader = (file: string, opts?: Record<string, unknown>) => Promise<unknown>
-
-/** Read the real file via the node build, or return null if it cannot be opened. */
-const readReal = async (): Promise<SheetTable[] | null> => {
-  try {
-    const read = (await import('read-excel-file/node')).default as unknown as LooseReader
-    const sheets = (await read(REAL_FILE, { getSheets: true })) as Array<{ sheet: string; data: unknown[][] }>
-    return sheets.map((s) => ({ name: s.sheet, rows: s.data }))
-  } catch {
-    return null
-  }
-}
-
-describe('real 3000-row workbook', () => {
-  // 20s per-test timeout: these read a real 3000×83 xlsx and can be CPU-starved when
-  // the whole suite runs in parallel (reading alone dominates; see the measured block).
-  it('only imports a sheet named exactly "Database"', async () => {
-    const sheets = await readReal()
-    if (!sheets) return
-    // The file in ~/Downloads is user-controlled; assert the rule relative to its actual sheets.
-    const hasDatabase = sheets.some((s) => s.name.trim().toLowerCase() === 'database')
-    if (hasDatabase) {
-      expect(parseWorkbook(sheets).records.length).toBeGreaterThan(0)
-    } else {
-      expect(() => parseWorkbook(sheets)).toThrow(/Sheet Database tidak ditemukan/)
-    }
-  }, 20000)
-
-  it('parses and plans ~3000 records quickly once the sheet is named Database', async () => {
-    const sheets = await readReal()
-    if (!sheets) return
-    const renamed = sheets.map((s) => ({ ...s, name: 'Database' }))
-    const start = performance.now()
-    const parsed = parseWorkbook(renamed)
-    const plan = reconcile(emptyExisting(), parsed, {
-      batchId: 'real', fileName: 'real.xlsx', sheetName: 'Database', createdBy: 'user-hr',
-      now: new Date().toISOString(), areas: testAreas, projects: testProjects,
+describe('portable synthetic .xlsx fixture', () => {
+  it('writes, reads, and parses a real anonymous xlsx without a developer path', async () => {
+    type BrowserWriter = (data: unknown, options?: Record<string, unknown>) => { toBlob: () => Promise<Blob> }
+    const write = (await import('write-excel-file/browser')).default as unknown as BrowserWriter
+    const sourceRow = buildRow({
+      personnelId: 'SYNTH-001', name: 'PERSONIL SINTETIS', nationalId: '0000000000000001',
+      areaCbs: 'MAKASSAR', projectName: 'NKP MT REGULER', position: 'SALES', joinDate: '2025-01-02',
     })
-    const elapsed = performance.now() - start
-    expect(parsed.records.length).toBeGreaterThan(2900)
-    // Each distinct identity becomes a master on first import.
-    expect(plan.summary.newMasters).toBe(parsed.groups.size)
-    // Pure parse+reconcile stays well under the file-read cost; generous bound tolerates
-    // CPU contention when the full suite runs in parallel.
-    expect(elapsed).toBeLessThan(10000)
-  }, 20000)
-
-  it('preserves real-world formats across the dataset', async () => {
-    const sheets = await readReal()
-    if (!sheets) return
-    const parsed = parseWorkbook(sheets.map((s) => ({ ...s, name: 'Database' })))
-    const first = parsed.records[0]
-    expect(first.fields.nationalId).toMatch(/^\d{16}$/)
-    expect(first.fields.ktpRt).toMatch(/^\d{3}$/)
-    expect(first.fields.birthDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    // Tanggal Setoran Awal is "-" in the source → stored as null (but read, not ignored).
-    expect(first.fields.initialDepositDate).toBeNull()
-    const statuses = new Set(parsed.records.map((r) => r.fields.employeeStatus))
-    expect(statuses.has('R/P')).toBe(true)
+    const data = [TEMPLATE_HEADER_ROW, sourceRow].map((row) => row.map((value) => ({ value: value ?? null })))
+    const blob = await write(data, { sheet: 'Database' }).toBlob()
+    const file = new File([blob], 'synthetic-personnel.xlsx', { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const sheets = await readWorkbookBrowser(file)
+    const parsed = parseWorkbook(sheets)
+    expect(parsed.records).toHaveLength(1)
+    expect(parsed.records[0].personnelId).toBe('SYNTH-001')
+    expect(parsed.records[0].name).toBe('PERSONIL SINTETIS')
   }, 20000)
 })

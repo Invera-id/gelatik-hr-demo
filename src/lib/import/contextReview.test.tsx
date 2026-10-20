@@ -28,7 +28,7 @@ function Probe({ decision }: { decision: ReviewDecision }) {
       <span data-testid="condition">{person?.conditionStatus ?? 'none'}</span>
       <span data-testid="status">{person?.employmentStatus ?? 'none'}</span>
       <span data-testid="timeline">{timeline.length}</span>
-      <button onClick={() => { if (pending[0]) void demo.resolveReviewItem(pending[0].id, decision) }}>resolve</button>
+      <button onClick={() => { if (pending[0]) { const ids = pending[0].recordIds.filter((id) => !id.startsWith('master:')); void demo.resolveReviewItem(pending[0].id, { ...decision, beforeRecordId: decision.beforeRecordId ?? ids[0], afterRecordId: decision.afterRecordId ?? ids[1] }) } }}>resolve</button>
     </div>
   )
 }

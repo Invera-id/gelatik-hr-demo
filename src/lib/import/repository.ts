@@ -18,11 +18,15 @@ export interface PersonnelRepository {
   commit(plan: ImportPlan): Promise<void>
   /** Update one review item's status + resolution (idempotent re-confirmation via decisionVersion). Returns the stored item. */
   resolveReviewItem(id: string, status: ReviewStatus, resolution: ReviewResolution | null): Promise<ReviewItem | null>
+  /** Resolve review and patch its current master in one IndexedDB transaction. */
+  resolveReviewAndPatch(id: string, businessKey: string, status: ReviewStatus, resolution: ReviewResolution, patch: Partial<StoredPersonnel['employee']>): Promise<ReviewItem | null>
   isSeeded(): Promise<boolean>
   markSeeded(): Promise<void>
   seedPersonnel(records: StoredPersonnel[]): Promise<void>
   /** Apply a partial update to the stored employee with this internal id (no-op if absent). */
   patchEmployee(employeeId: string, patch: Partial<StoredPersonnel['employee']>): Promise<boolean>
+  /** Apply one patch to several imported employees in a single transaction. */
+  patchEmployees(employeeIds: string[], patch: Partial<StoredPersonnel['employee']>): Promise<number>
   clearAll(): Promise<void>
 }
 
@@ -170,6 +174,31 @@ export class IndexedDbPersonnelRepository implements PersonnelRepository {
     })
   }
 
+  async resolveReviewAndPatch(id: string, businessKey: string, status: ReviewStatus, resolution: ReviewResolution, patch: Partial<StoredPersonnel['employee']>): Promise<ReviewItem | null> {
+    const db = await this.open()
+    return new Promise<ReviewItem | null>((resolve, reject) => {
+      const tx = db.transaction([STORE_REVIEWS, STORE_PERSONNEL], 'readwrite')
+      const reviews = tx.objectStore(STORE_REVIEWS)
+      const personnel = tx.objectStore(STORE_PERSONNEL)
+      let updated: ReviewItem | null = null
+      const reviewRequest = reviews.get(id) as IDBRequest<ReviewItem | undefined>
+      reviewRequest.onsuccess = () => {
+        if (!reviewRequest.result) { tx.abort(); return }
+        updated = { ...reviewRequest.result, status, resolution, updatedAt: new Date().toISOString() }
+        reviews.put(updated)
+        const masterRequest = personnel.get(businessKey) as IDBRequest<StoredPersonnel | undefined>
+        masterRequest.onsuccess = () => {
+          if (!masterRequest.result) { tx.abort(); return }
+          const now = new Date().toISOString()
+          personnel.put({ ...masterRequest.result, employee: { ...masterRequest.result.employee, ...patch, updatedAt: now }, updatedAt: now })
+        }
+      }
+      tx.oncomplete = () => resolve(updated)
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error ?? new ImportAbortError('Keputusan review dibatalkan karena master tidak dapat diperbarui.'))
+    })
+  }
+
   async isSeeded(): Promise<boolean> {
     const db = await this.open()
     const tx = db.transaction(STORE_META, 'readonly')
@@ -217,6 +246,30 @@ export class IndexedDbPersonnelRepository implements PersonnelRepository {
       }
       request.onerror = () => reject(request.error)
       tx.oncomplete = () => resolve(found)
+      tx.onerror = () => reject(tx.error)
+      tx.onabort = () => reject(tx.error)
+    })
+  }
+
+  async patchEmployees(employeeIds: string[], patch: Partial<StoredPersonnel['employee']>): Promise<number> {
+    if (!employeeIds.length) return 0
+    const db = await this.open()
+    return new Promise<number>((resolve, reject) => {
+      const tx = db.transaction(STORE_PERSONNEL, 'readwrite')
+      const store = tx.objectStore(STORE_PERSONNEL)
+      const request = store.getAll() as IDBRequest<StoredPersonnel[]>
+      const wanted = new Set(employeeIds)
+      let updated = 0
+      request.onsuccess = () => {
+        const now = new Date().toISOString()
+        for (const target of request.result) {
+          if (!wanted.has(target.employee.id)) continue
+          updated++
+          store.put({ ...target, employee: { ...target.employee, ...patch, updatedAt: now }, updatedAt: now })
+        }
+      }
+      request.onerror = () => reject(request.error)
+      tx.oncomplete = () => resolve(updated)
       tx.onerror = () => reject(tx.error)
       tx.onabort = () => reject(tx.error)
     })

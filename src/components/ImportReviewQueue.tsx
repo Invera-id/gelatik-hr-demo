@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { AlertTriangle, GitCompareArrows, ShieldQuestion } from 'lucide-react'
 import { useDemo } from '../context/DemoContext'
-import { canReviewImportItem, formatDate } from '../lib/businessRules'
+import { canReviewImportItem, canViewImportReviewItem, formatDate } from '../lib/businessRules'
 import { StatusBadge } from './StatusBadge'
 import type { EmployeeMovementType } from '../types'
 import type { ReviewDecision, ReviewItem, SourceImportRecord } from '../lib/import/types'
@@ -44,17 +44,18 @@ const FIELD_LABELS: Array<[string, string]> = [
   ['mobilePhone', 'Handphone'], ['homePhone', 'Telp Rumah'], ['ktpAddress', 'Alamat KTP'], ['nationalId', 'NoKTP'],
 ]
 
-function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImportRecord[] }) {
+function ReviewCard({ item, records, readOnly }: { item: ReviewItem; records: SourceImportRecord[]; readOnly: boolean }) {
   const { resolveReviewItem } = useDemo()
   const [interp, setInterp] = useState<Interp>(
     item.kind === 'IDENTITY_CONFLICT' ? 'IDENTITY' : item.aspects.includes('PLACEMENT_CHANGE') ? 'MUTATION' : item.aspects.includes('EXIT') ? 'COMPANY_EXIT' : 'CORRECTION',
   )
   const [movementType, setMovementType] = useState<EmployeeMovementType>('MUTATION')
-  const [effectiveDate, setEffectiveDate] = useState<string>(item.dates[0]?.value ?? '')
-  const [beforeId, setBeforeId] = useState<string>(records[0]?.id ?? '')
+  const [effectiveDate, setEffectiveDate] = useState<string>(() => item.dates.find((date) => /mutasi|keluar|bergabung/i.test(date.label))?.value ?? '')
+  const [beforeId, setBeforeId] = useState<string>(item.currentMasterFields ? 'CURRENT_MASTER' : records[0]?.id ?? '')
   const [afterId, setAfterId] = useState<string>(records[1]?.id ?? records[0]?.id ?? '')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
 
   // Fields that actually differ across the involved records, for the comparison grid.
   const rows = useMemo(
@@ -67,7 +68,7 @@ function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImport
     switch (interp) {
       case 'PENDING': decision.keepPending = true; break
       case 'IDENTICAL': decision.decisionKind = 'IDENTICAL_DUPLICATE'; break
-      case 'PROFILE': case 'CORRECTION': decision.decisionKind = 'PROFILE_VARIATION'; break
+      case 'PROFILE': case 'CORRECTION': decision.decisionKind = 'PROFILE_VARIATION'; decision.afterRecordId = afterId; break
       case 'IDENTITY': decision.decisionKind = 'IDENTITY_CONFLICT'; break
       case 'MUTATION':
         decision.decisionKind = 'PLACEMENT_CHANGE'
@@ -87,11 +88,13 @@ function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImport
         break
     }
     setBusy(true)
-    await resolveReviewItem(item.id, decision)
+    const message = await resolveReviewItem(item.id, decision)
+    setError(message ?? '')
     setBusy(false)
   }
 
   const needsMovementDetail = interp === 'MUTATION' || interp === 'REENTRY'
+  const needsAfter = needsMovementDetail || interp === 'PROFILE' || interp === 'CORRECTION'
   const needsDate = needsMovementDetail || interp === 'PLACEMENT_END' || interp === 'COMPANY_EXIT'
 
   return (
@@ -102,6 +105,7 @@ function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImport
           <span className="review-pid">{item.personnelId}</span>
         </div>
         <div className="review-tags">
+          {item.status === 'KEPT_PENDING' && <StatusBadge tone="warning">Pending — dapat dibuka kembali</StatusBadge>}
           {item.aspects.map((a) => <StatusBadge key={a} tone={a === 'EXIT' ? 'danger' : a === 'PLACEMENT_CHANGE' ? 'info' : a === 'IDENTITY_CONFLICT' ? 'warning' : 'purple'}>{KIND_LABEL[a] ?? a}</StatusBadge>)}
           <span className="review-count">{records.length} catatan berbeda</span>
         </div>
@@ -115,16 +119,19 @@ function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImport
           <thead>
             <tr>
               <th>Field</th>
+              {item.currentMasterFields && <th>Kondisi saat ini</th>}
               {records.map((r, i) => <th key={r.id}>Catatan {i + 1} · baris {r.rowNumber}</th>)}
             </tr>
           </thead>
           <tbody>
             {rows.map(([key, label]) => {
               const values = records.map((r) => r.fields[key] ?? '—')
+              const current = item.currentMasterFields?.[key] ?? '—'
               const differs = new Set(values.filter((v) => v !== '—')).size > 1
               return (
                 <tr key={key} className={differs ? 'differs' : ''}>
                   <td>{label}</td>
+                  {item.currentMasterFields && <td>{current}</td>}
                   {values.map((v, i) => <td key={i}>{v}</td>)}
                 </tr>
               )
@@ -139,7 +146,7 @@ function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImport
         </div>
       )}
 
-      <div className="review-form">
+      {readOnly ? <div className="rule-note compact-note">Anda dapat melihat catatan ini, tetapi permission untuk menyelesaikan review belum aktif.</div> : <div className="review-form">
         <label>Interpretasi
           <select value={interp} onChange={(e) => setInterp(e.target.value as Interp)}>
             {INTERP_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -156,9 +163,14 @@ function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImport
           <>
             <label>Kondisi sebelum
               <select value={beforeId} onChange={(e) => setBeforeId(e.target.value)}>
+                {item.currentMasterFields && <option value="CURRENT_MASTER">Kondisi master saat ini</option>}
                 {records.map((r, i) => <option key={r.id} value={r.id}>Catatan {i + 1} (baris {r.rowNumber})</option>)}
               </select>
             </label>
+          </>
+        )}
+        {needsAfter && (
+          <>
             <label>Kondisi sesudah
               <select value={afterId} onChange={(e) => setAfterId(e.target.value)}>
                 {records.map((r, i) => <option key={r.id} value={r.id}>Catatan {i + 1} (baris {r.rowNumber})</option>)}
@@ -177,7 +189,8 @@ function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImport
         <button className="button primary" disabled={busy} onClick={submit}>
           <GitCompareArrows size={16} /> {interp === 'PENDING' ? 'Simpan sebagai pending' : 'Konfirmasi keputusan'}
         </button>
-      </div>
+        {error && <p className="field-error">{error}</p>}
+      </div>}
     </article>
   )
 }
@@ -186,7 +199,7 @@ function ReviewCard({ item, records }: { item: ReviewItem; records: SourceImport
 export function ImportReviewQueue() {
   const { currentUser, permissionConfig, importReviewItems, importSourceRecords } = useDemo()
   const pending = useMemo(
-    () => importReviewItems.filter((r) => r.status === 'PENDING' && currentUser && canReviewImportItem(currentUser, permissionConfig, r)),
+    () => importReviewItems.filter((r) => ['PENDING', 'KEPT_PENDING'].includes(r.status) && currentUser && canViewImportReviewItem(currentUser, permissionConfig, r)),
     [importReviewItems, currentUser, permissionConfig],
   )
   const recordsFor = (item: ReviewItem) =>
@@ -211,7 +224,7 @@ export function ImportReviewQueue() {
           <p>Beberapa personil punya lebih dari satu catatan berbeda. Tentukan apakah itu duplikasi, perubahan penempatan, exit, atau re-entry. Belum ada status yang diubah sampai Anda konfirmasi. <Link to="/employees">Lihat personil →</Link></p>
         </div>
       </div>
-      {pending.map((item) => <ReviewCard key={item.id} item={item} records={recordsFor(item)} />)}
+      {pending.map((item) => <ReviewCard key={item.id} item={item} records={recordsFor(item)} readOnly={!canReviewImportItem(currentUser, permissionConfig, item)} />)}
     </section>
   )
 }

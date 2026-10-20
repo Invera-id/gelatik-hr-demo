@@ -7,18 +7,20 @@ import { StatusBadge } from '../components/StatusBadge'
 import { useDemo } from '../context/DemoContext'
 import { exportBusinessTable, type ExportValue } from '../lib/excelExport'
 import { COLUMN_TEMPLATE } from '../lib/import/columns'
-import type { ImportPhase, ImportRunResult } from '../lib/import/service'
-import type { ImportBatchStatus } from '../lib/import/types'
+import type { ImportPhase, ImportRunResult, PreparedImport } from '../lib/import/service'
+import type { FieldIssue, ImportBatchStatus } from '../lib/import/types'
 
 const PHASES: Array<{ key: ImportPhase; label: string }> = [
   { key: 'READING', label: 'Membaca file' },
   { key: 'PARSING', label: 'Memvalidasi data' },
+  { key: 'PREVIEW', label: 'Preview & konfirmasi' },
   { key: 'SAVING', label: 'Menyimpan ke browser' },
   { key: 'DONE', label: 'Selesai' },
 ]
 
 const STATUS_META: Record<ImportBatchStatus, { label: string; tone: 'success' | 'warning' | 'danger' }> = {
   COMPLETED: { label: 'Selesai', tone: 'success' },
+  COMPLETED_WITH_REVIEW: { label: 'Selesai, perlu review', tone: 'warning' },
   COMPLETED_WITH_WARNINGS: { label: 'Selesai dengan peringatan', tone: 'warning' },
   COMPLETED_WITH_EXCEPTIONS: { label: 'Selesai dengan baris perlu diperbaiki', tone: 'warning' },
   FAILED: { label: 'Gagal', tone: 'danger' },
@@ -26,37 +28,72 @@ const STATUS_META: Record<ImportBatchStatus, { label: string; tone: 'success' | 
 
 const MAX_ISSUE_ROWS = 300
 
+const KIND_PREVIEW_LABEL: Record<string, string> = {
+  IDENTICAL_DUPLICATE: 'Duplikasi identik',
+  PROFILE_VARIATION: 'Variasi profil',
+  PLACEMENT_CHANGE: 'Perubahan penempatan',
+  EXIT: 'Exit',
+  REENTRY: 'Re-entry',
+  IDENTITY_CONFLICT: 'Konflik identitas',
+  UNDETERMINED: 'Belum dapat ditentukan',
+}
+
 export function ImportPage() {
-  const { currentUser, canImportPersonnel, importPersonnelFile, importedPersonnel, importExceptions, importStorageReady, importStorageError } = useDemo()
+  const { currentUser, canImportPersonnel, preparePersonnelImport, confirmPersonnelImport, importSourceRecords, importExceptions, importStorageReady, importStorageError } = useDemo()
   const inputRef = useRef<HTMLInputElement>(null)
   const [phase, setPhase] = useState<ImportPhase | null>(null)
   const [result, setResult] = useState<ImportRunResult | null>(null)
   const [fileName, setFileName] = useState('')
+  const [prepared, setPrepared] = useState<PreparedImport | null>(null)
+  const [lastWarnings, setLastWarnings] = useState<FieldIssue[]>([])
 
-  const processing = phase !== null && phase !== 'DONE'
+  const processing = phase !== null && !['PREVIEW', 'DONE'].includes(phase)
   const batchId = result?.ok ? result.batch?.id ?? null : null
 
   const warnings = useMemo(
-    () => (batchId ? importedPersonnel.filter((p) => p.batchId === batchId).flatMap((p) => p.warnings) : []),
-    [batchId, importedPersonnel],
+    () => prepared ? prepared.plan.sourceRecordsToPut.flatMap((record) => record.warnings) : (batchId ? lastWarnings.length ? lastWarnings : importSourceRecords.filter((record) => record.batchId === batchId).flatMap((record) => record.warnings) : []),
+    [batchId, importSourceRecords, lastWarnings, prepared],
   )
   const exceptions = useMemo(
-    () => (batchId ? importExceptions.filter((e) => e.batchId === batchId) : []),
-    [batchId, importExceptions],
+    () => prepared ? prepared.plan.exceptions : (batchId ? importExceptions.filter((e) => e.batchId === batchId) : []),
+    [batchId, importExceptions, prepared],
   )
-
-  if (!currentUser) return null
 
   const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file || processing) return
     setFileName(file.name)
     setResult(null)
+    setPrepared(null)
+    setLastWarnings([])
     setPhase('READING')
-    const runResult = await importPersonnelFile(file, setPhase)
-    setResult(runResult)
-    setPhase(runResult.ok ? 'DONE' : null)
+    const previewResult = await preparePersonnelImport(file, setPhase)
+    if (previewResult.ok && previewResult.prepared) {
+      setPrepared(previewResult.prepared)
+      setLastWarnings(previewResult.prepared.plan.sourceRecordsToPut.flatMap((record) => record.warnings))
+      setPhase('PREVIEW')
+    } else {
+      setResult({ ok: false, batch: null, summary: null, status: null, exceptions: [], error: previewResult.error })
+      setPhase(null)
+    }
     if (inputRef.current) inputRef.current.value = ''
+  }
+
+  const confirmImport = async () => {
+    if (!prepared || processing) return
+    setPhase('SAVING')
+    const runResult = await confirmPersonnelImport(prepared, setPhase)
+    setResult(runResult)
+    if (runResult.ok) setPrepared(null)
+    setPhase(runResult.ok ? 'DONE' : null)
+  }
+
+  const cancelPreview = () => {
+    setPrepared(null)
+    setLastWarnings([])
+    setResult(null)
+    setPhase(null)
+    setFileName('')
   }
 
   const downloadTemplate = async () => {
@@ -84,18 +121,46 @@ export function ImportPage() {
     exportBusinessTable({ headers: ['Baris Excel', 'Kolom', 'Jenis', 'Alasan', 'Nilai Sumber'], rows }, `laporan-masalah-import-${batchId}.csv`)
   }
 
-  const summary = result?.ok ? result.summary : null
+  const summary = prepared?.plan.summary ?? (result?.ok ? result.summary : null)
   const statusMeta = result?.ok && result.status ? STATUS_META[result.status] : null
   const issueRows = [
     ...exceptions.map((e) => ({ key: `e-${e.id}`, rowNumber: e.rowNumber, column: '—', type: 'EXCEPTION' as const, reason: e.reason })),
     ...warnings.map((w, i) => ({ key: `w-${i}`, rowNumber: w.rowNumber, column: w.column, type: 'WARNING' as const, reason: w.reason })),
   ].sort((a, b) => a.rowNumber - b.rowNumber)
+  const repeatedIdentities = useMemo(() => {
+    if (!prepared) return []
+    const allSources = [...importSourceRecords, ...prepared.plan.sourceRecordsToPut]
+    const sourceById = new Map(allSources.map((record) => [record.id, record]))
+    const byBusinessKey = new Map<string, { personnelId: string; name: string; rowNumbers: number[]; kinds: Set<string> }>()
+    for (const item of prepared.plan.reviewItemsToPut) {
+      const sourceRecords = item.recordIds.map((id) => sourceById.get(id)).filter(Boolean)
+      if (sourceRecords.length < 2) continue
+      const current = byBusinessKey.get(item.businessKey) ?? {
+        personnelId: item.personnelId,
+        name: item.personnelName,
+        rowNumbers: [],
+        kinds: new Set<string>(),
+      }
+      current.rowNumbers.push(...sourceRecords.map((record) => record!.rowNumber))
+      item.aspects.forEach((kind) => current.kinds.add(kind))
+      byBusinessKey.set(item.businessKey, current)
+    }
+    return [...byBusinessKey.entries()].map(([businessKey, value]) => ({
+      businessKey,
+      personnelId: value.personnelId,
+      name: value.name,
+      rowNumbers: [...new Set(value.rowNumbers)].sort((a, b) => a - b),
+      kinds: [...value.kinds],
+    }))
+  }, [importSourceRecords, prepared])
+
+  if (!currentUser) return null
 
   return <>
     <PageHeader
       eyebrow="CONTROLLED DATA INPUT"
       title="Import Excel Personil"
-      description="Pilih satu file Excel; sistem membaca sheet Database, menormalisasi, memvalidasi, lalu menyimpan otomatis."
+      description="Pilih file, periksa validasi dan preview, lalu konfirmasi sebelum data disimpan ke browser."
       actions={<button className="button secondary" onClick={downloadTemplate}><Download /> Download template Database</button>}
     />
 
@@ -109,15 +174,15 @@ export function ImportPage() {
     )}
 
     {!canImportPersonnel && (
-      <div className="alert warning"><AlertTriangle /><div><strong>Akses terbatas</strong><p>Hanya HR Head Office dan Super Admin yang dapat mengimpor personil.</p></div></div>
+      <div className="alert warning"><AlertTriangle /><div><strong>Akses terbatas</strong><p>Role Anda tidak memiliki permission Mengimpor Excel Personel. Antrean review tetap dapat dilihat jika permission terkait aktif.</p></div></div>
     )}
 
     <section className="card import-upload">
-      <input ref={inputRef} type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleFile} disabled={processing || !canImportPersonnel} />
+      <input ref={inputRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleFile} disabled={processing || !canImportPersonnel} />
       <span><Upload /></span>
       <div>
         <h2>{processing ? 'Memproses…' : fileName || 'Pilih file Excel (.xlsx)'}</h2>
-        <p>Impor otomatis berjalan begitu file dipilih. Hanya sheet <strong>Database</strong> yang dibaca.</p>
+        <p>File belum disimpan saat dipilih. Hanya .xlsx dengan sheet <strong>Database</strong>; kolom dikenali berdasarkan nama header.</p>
       </div>
       <button className="button primary" onClick={() => inputRef.current?.click()} disabled={processing || !canImportPersonnel}>
         {processing ? <><Loader2 className="spin" /> Memproses</> : <>Pilih Excel</>}
@@ -142,6 +207,43 @@ export function ImportPage() {
 
     {result && !result.ok && (
       <div className="alert error"><XCircle /><div><strong>Impor gagal — tidak ada perubahan data</strong><p>{result.error}</p></div></div>
+    )}
+
+    {prepared && summary && (
+      <section className="card">
+        <div className="alert warning"><AlertTriangle /><div><strong>Preview siap — belum ada data yang disimpan</strong><p>{prepared.scopePreview.validInScopeRows} valid dalam scope, {prepared.scopePreview.warningReviewRows} warning/review, {prepared.scopePreview.errorRows} error, dan {prepared.scopePreview.outOfScopeRows} di luar scope.</p><p>{prepared.discoveredAreas.length} Area dan {prepared.discoveredProjects.length} Project baru di dalam scope akan disimpan setelah konfirmasi.</p></div></div>
+        <div className="import-counts scope-preview-counts">
+          <article className="card"><CheckCircle2 /><strong>{prepared.scopePreview.validInScopeRows}</strong><span>Valid dalam scope</span></article>
+          <article className="card warning"><AlertTriangle /><strong>{prepared.scopePreview.warningReviewRows}</strong><span>Warning / review</span></article>
+          <article className="card error"><XCircle /><strong>{prepared.scopePreview.errorRows}</strong><span>Error</span></article>
+          <article className="card"><Database /><strong>{prepared.scopePreview.outOfScopeRows}</strong><span>Di luar scope</span></article>
+        </div>
+        <div className="form-actions">
+          <button className="button secondary" onClick={cancelPreview} disabled={processing}>Batal</button>
+          <button className="button primary" onClick={confirmImport} disabled={processing || summary.exceptionRows > 0}><HardDriveDownload /> Konfirmasi & Simpan</button>
+        </div>
+        {summary.exceptionRows > 0 && <p className="field-error">Perbaiki seluruh exception di workbook lalu pilih file kembali. Plan ini tidak dapat dikomit.</p>}
+      </section>
+    )}
+
+    {prepared && prepared.scopePreview.excludedRows.length > 0 && (
+      <section className="card table-card">
+        <div className="table-title"><div><span className="section-icon"><AlertTriangle /></span><div><h2>Baris di Luar Cakupan Area</h2><p>Baris berikut tidak masuk plan import dan tidak dapat membuat referensi Area/Project.</p></div></div><span className="record-count">{prepared.scopePreview.excludedRows.length} BARIS</span></div>
+        <div className="table-scroll"><table><thead><tr><th>Baris</th><th>Personnel ID</th><th>Nama</th><th>Area</th><th>Status</th></tr></thead><tbody>{prepared.scopePreview.excludedRows.slice(0, 100).map((row) => <tr key={`${row.rowNumber}-${row.personnelId}`}><td>{row.rowNumber}</td><td>{row.personnelId}</td><td>{row.name}</td><td>{row.areaName}</td><td><StatusBadge tone="neutral">{row.message}</StatusBadge></td></tr>)}</tbody></table></div>
+      </section>
+    )}
+
+    {prepared && repeatedIdentities.length > 0 && (
+      <section className="card table-card">
+        <div className="table-title"><div><span className="section-icon"><GitCompareArrows /></span><div><h2>Personnel ID dengan Beberapa Catatan</h2><p>Ini bukan otomatis data ganda. Catatan dapat mewakili koreksi, mutasi, exit, atau re-entry dan perlu ditinjau.</p></div></div><span className="record-count">{repeatedIdentities.length} ID</span></div>
+        <div className="table-scroll">
+          <table>
+            <thead><tr><th>Personnel ID</th><th>Nama</th><th>Jumlah Catatan</th><th>Baris Excel</th><th>Indikasi</th></tr></thead>
+            <tbody>{repeatedIdentities.slice(0, 100).map((item) => <tr key={item.businessKey}><td><strong>{item.personnelId}</strong></td><td>{item.name}</td><td>{item.rowNumbers.length}</td><td>{item.rowNumbers.join(', ')}</td><td>{item.kinds.map((kind) => KIND_PREVIEW_LABEL[kind] ?? kind).join(', ') || 'Perlu review'}</td></tr>)}</tbody>
+          </table>
+        </div>
+        {repeatedIdentities.length > 100 && <div className="empty-inline">Menampilkan 100 dari {repeatedIdentities.length} Personnel ID.</div>}
+      </section>
     )}
 
     {result?.ok && summary && statusMeta && (
@@ -178,6 +280,7 @@ export function ImportPage() {
             <div><span>Perlu ditinjau</span><strong>{summary.pendingReviewItems}</strong></div>
             <div><span>Baris dengan peringatan</span><strong>{summary.warningRows}</strong></div>
             <div><span>Baris exception</span><strong>{summary.exceptionRows}</strong></div>
+            <div><span>Di luar scope</span><strong>{summary.outOfScopeRows ?? 0}</strong></div>
             <div><span>Baris kosong dilewati</span><strong>{summary.blankRowsSkipped}</strong></div>
           </div>
         </section>

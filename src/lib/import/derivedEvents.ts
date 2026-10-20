@@ -1,5 +1,6 @@
 import type { Area, EmployeeMovement, Project } from '../../types'
 import type { ReviewItem, SourceImportRecord } from './types'
+import { findAreaId, findProjectId } from './referenceCatalog'
 
 export interface DeriveContext {
   /** businessKey → master employee internal id. */
@@ -9,18 +10,6 @@ export interface DeriveContext {
 }
 
 const IMPORT_SOURCE_LABEL = 'Import Excel'
-
-const areaIdByName = (name: string | null | undefined, areas: Area[]): string | null => {
-  if (!name) return null
-  const found = areas.find((a) => a.name.toLowerCase() === name.toLowerCase() || a.id.toLowerCase() === name.toLowerCase())
-  return found?.id ?? null
-}
-
-const projectIdByName = (name: string | null | undefined, projects: Project[]): string | null => {
-  if (!name) return null
-  const found = projects.find((p) => p.name.toLowerCase() === name.toLowerCase() || p.id.toLowerCase() === name.toLowerCase())
-  return found?.id ?? null
-}
 
 /**
  * Derive confirmed career-timeline movements from CONFIRMED review items. This is
@@ -49,13 +38,15 @@ export const deriveImportMovements = (
 
     const before = res.beforeRecordId ? sourceById.get(res.beforeRecordId) : undefined
     const after = res.afterRecordId ? sourceById.get(res.afterRecordId) : undefined
+    const beforeFields = res.beforeRecordId === 'CURRENT_MASTER' ? item.currentMasterFields ?? undefined : before?.fields
 
     const movementType =
       res.decisionKind === 'EXIT' ? 'EXIT'
         : res.decisionKind === 'REENTRY' ? 'REENTRY'
           : res.movementType ?? 'MUTATION'
 
-    const effectiveDate = res.effectiveDate ?? after?.fields.mutationDate ?? after?.fields.joinDate ?? item.createdAt.slice(0, 10)
+    const effectiveDate = res.effectiveDate
+    if (!effectiveDate) continue
 
     const id = `imp-ev:${item.id}:${res.decisionVersion}`
     byId.set(id, {
@@ -63,11 +54,11 @@ export const deriveImportMovements = (
       employeeId,
       movementType,
       effectiveDate,
-      previousAreaId: areaIdByName(before?.fields.areaCbs, ctx.areas),
-      newAreaId: areaIdByName(after?.fields.areaCbs, ctx.areas),
-      previousProjectId: projectIdByName(before?.fields.projectName, ctx.projects),
-      newProjectId: projectIdByName(after?.fields.projectName, ctx.projects),
-      previousPosition: before?.fields.position ?? null,
+      previousAreaId: findAreaId(beforeFields?.areaCbs, ctx.areas),
+      newAreaId: findAreaId(after?.fields.areaCbs, ctx.areas),
+      previousProjectId: findProjectId(beforeFields?.projectName, findAreaId(beforeFields?.areaCbs, ctx.areas), ctx.projects),
+      newProjectId: findProjectId(after?.fields.projectName, findAreaId(after?.fields.areaCbs, ctx.areas), ctx.projects),
+      previousPosition: beforeFields?.position ?? null,
       newPosition: after?.fields.position ?? null,
       notes: `${IMPORT_SOURCE_LABEL} — ${res.note || item.reason || item.kind.replaceAll('_', ' ')}`,
       createdBy: res.reviewedBy,

@@ -4,11 +4,11 @@ import { Link } from 'react-router-dom'
 import { CareerTimeline } from '../components/CareerTimeline'
 import { PageHeader } from '../components/PageHeader'
 import { useDemo } from '../context/DemoContext'
-import { areas, demoUsers } from '../data/demoData'
+import { demoUsers } from '../data/demoData'
 import { filterEmployeesForUser } from '../lib/businessRules'
 
 export function MovementHistoryPage() {
-  const { currentUser, employees, projects, employeeMovements, permissionConfig } = useDemo()
+  const { currentUser, areas, employees, projects, employeeMovements, permissionConfig } = useDemo()
   const user = currentUser ?? demoUsers[0]
   const [employeeId, setEmployeeId] = useState('employee-026')
   const [query, setQuery] = useState('')

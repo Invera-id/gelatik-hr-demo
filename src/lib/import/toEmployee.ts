@@ -2,22 +2,11 @@ import type { Area, Employee, EmployeeProfile, Project } from '../../types'
 import { EMPLOYEE_FIELD_KEYS } from './mapping'
 import type { PersonnelStructured, StoredPersonnel } from './types'
 import type { ParsedSourceRecord } from './parse'
+import { findAreaId, findProjectId } from './referenceCatalog'
 
 export interface BuildContext {
   areas: Area[]
   projects: Project[]
-}
-
-const matchAreaId = (areaCbs: string | null, areas: Area[]): string | null => {
-  if (!areaCbs) return null
-  const found = areas.find((area) => area.name.toLowerCase() === areaCbs.toLowerCase() || area.id.toLowerCase() === areaCbs.toLowerCase())
-  return found?.id ?? null
-}
-
-const matchProjectId = (projectName: string | null, projects: Project[]): string | null => {
-  if (!projectName) return null
-  const found = projects.find((project) => project.name.toLowerCase() === projectName.toLowerCase() || project.id.toLowerCase() === projectName.toLowerCase())
-  return found?.id ?? null
 }
 
 /** Build the display EmployeeProfile from the merged canonical fields. */
@@ -53,10 +42,9 @@ export const buildEmployee = (
   identity: EmployeeIdentity,
   context: BuildContext,
 ): Employee => {
-  const areaId = matchAreaId(fields.areaCbs ?? null, context.areas)
-  const projectId = matchProjectId(fields.projectName ?? null, context.projects)
+  const areaId = findAreaId(fields.areaCbs ?? null, context.areas)
+  const projectId = findProjectId(fields.projectName ?? null, areaId, context.projects)
   const exitDate = fields.exitDate ?? null
-  const contractEndDate = fields.contractEndDate ?? null
   return {
     id: identity.id,
     personnelId: fields.personnelId ?? '',
@@ -69,14 +57,14 @@ export const buildEmployee = (
     conditionStatus: identity.conditionStatus ?? 'CONFIRMED',
     joinDate: fields.joinDate ?? null,
     contractStartDate: fields.contractStartDate ?? fields.joinDate ?? null,
-    contractEndDate,
-    contractStatus: contractEndDate ? 'SIGNED' : 'NOT_AVAILABLE',
+    contractEndDate: fields.contractEndDate ?? null,
+    contractStatus: 'NOT_AVAILABLE',
     bpjsStatus: null,
     profile: buildProfile(fields, areaId, context.areas),
     createdBy: identity.createdBy,
-    validationStatus: 'VALIDATED',
-    validatedBy: identity.validatedBy,
-    validatedAt: identity.validatedAt,
+    validationStatus: 'SUBMITTED',
+    validatedBy: null,
+    validatedAt: null,
     submittedAt: identity.createdAt,
     revisionNote: null,
     createdAt: identity.createdAt,
