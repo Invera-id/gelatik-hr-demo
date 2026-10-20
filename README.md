@@ -1,8 +1,8 @@
 # Gelatik HR — Workforce Monitoring Demo V3
 
-Frontend-only React/Vite prototype untuk memvalidasi requirement workforce movement, turnover, replacement, fulfillment, dan monitoring PT Gelatik Supra. Seluruh data bersifat fiktif dan disimpan lokal di browser.
+Frontend-only React/Vite prototype untuk memvalidasi requirement workforce movement, turnover, replacement, fulfillment, dan monitoring PT Gelatik Supra. Build default tidak membawa seed employee; data uji disimpan lokal di browser.
 
-> **Demo Environment** — Seluruh data yang ditampilkan merupakan data dummy untuk simulasi requirement dan bukan data aktual PT Gelatik Supra.
+> **Import-Only Environment** — Repository tidak memuat data employee aktual PT Gelatik Supra. Jangan commit, log, screenshot, atau deploy workbook internal.
 
 ## Menjalankan aplikasi
 
@@ -27,7 +27,7 @@ Semua akun menggunakan password `password`.
 
 | Role | Email | Default scope | Karakter akses |
 |---|---|---|---|
-| Area Supporting / Data Input | `bandung@demo.test` | Bandung | Input dan monitoring area |
+| Area Supporting / Data Input | `bandung@demo.test` | Area Sendiri (Bandung) | Data entry, movement, dan Import Excel dalam scope |
 | HR Head Office | `hr@demo.test` | All Areas | Validation, matching, fulfillment, import/export |
 | Operational / Manager | `operations@demo.test` | All Areas | Read-only monitoring |
 | BoD / GM | `management@demo.test` | All Areas | Read-only management view |
@@ -53,27 +53,30 @@ Semua akun menggunakan password `password`.
 | `/replacements` | Replacement & Fulfillment monitor |
 | `/replacements/:id` | Matching, fulfillment, dan replacement chain |
 | `/reports/export` | Lima jenis export `.xlsx` sesuai filter/scope |
-| `/import` | Controlled `.xlsx` preview/validation/import (HR/Super Admin) |
-| `/settings/access` | Demo RBAC matrix (Super Admin) |
-| `/settings/validation` | Validation policy (Super Admin) |
+| `/import` | Controlled `.xlsx` preview/validation/import dan antrean review sesuai permission/scope |
+| `/settings/access` | Demo RBAC matrix (`manage_roles`) |
+| `/settings/validation` | Validation policy (`manage_validation_policy`) |
 
 ## Data, Excel, dan reset
 
-- Demo state memakai `localStorage`; sesi login memakai `sessionStorage`.
-- Menu profile menyediakan **Reset data demo** untuk mengembalikan employee, movement, exit, replacement, projects, quota, permission, policy, notes, flags, dan contract scenarios ke seed deterministik. Reset dianjurkan bila browser pernah dipakai untuk V2.
+- Mode default adalah `IMPORT_ONLY`. Seed workforce hanya aktif bila build secara eksplisit memakai `VITE_DEMO_DATA_MODE=SAMPLE`.
+- Import-only memakai namespace `gelatik-import-only-data-v1`, sehingga seed lama pada `gelatik-demo-data-v2` tidak dimuat. Data import tetap berada di IndexedDB `gelatik-personnel-db`.
+- Menu profile mereset transaksi lokal tanpa menghapus personnel, batch, source records, exceptions, atau review items hasil import.
+- Sesi login memakai `sessionStorage`; notifikasi disimpan pada namespace terpisah per mode.
 - Export `.xlsx` diproses di browser; CSV menjadi fallback bila workbook gagal dibuat.
 
 ## Import Excel Personil (83 kolom)
 
-Fitur impor penuh ada di menu **Import Excel** (role HR HO / Super Admin). Pilih satu file `.xlsx`; sistem otomatis membaca → menormalisasi → memvalidasi → menyimpan.
+Fitur impor ada di menu **Import Excel** ketika permission **Mengimpor Excel Personel** aktif, termasuk untuk `bandung@demo.test`, dengan alur `Pilih .xlsx → Parse → Validate → Preview → Confirm → Commit`. Cancel pada tahap preview tidak mengubah IndexedDB.
 
 - **Hanya sheet bernama `Database`** yang diproses (cocok persis setelah trim + normalisasi huruf). Sheet lain, termasuk `Database aktif`, diabaikan; tidak ada fallback ke sheet pertama. Jika tidak ada sheet `Database`, impor dibatalkan tanpa mengubah data.
 - Data impor disimpan **persisten di IndexedDB** (`gelatik-personnel-db`), bukan server dan bukan hanya state React — tetap ada setelah refresh/tutup browser. Daftar, detail, dan dashboard membaca sumber yang sama.
-- Impor ulang melakukan **dedup berdasarkan ID Personil**: ID baru → insert, ID berubah → update (nilai kosong tidak menghapus nilai lama), ID sama & tidak berubah → unchanged. Impor file identik tidak menggandakan data.
-- Baris tanpa identitas minimum (ID Personil + Nama) dan konflik NoKTP disimpan sebagai **exception**; field opsional bermasalah hanya menghasilkan **warning** (baris tetap tersimpan). Ringkasan + rincian masalah + unduhan laporan tersedia setelah impor.
-- Arsitektur berlapis & swappable: `src/lib/import/` (`columns`, `normalizers`, `workbook`, `mapping`, `parse`, `plan`, `repository`, `service`). Repository memakai interface `PersonnelRepository` sehingga backend API bisa menggantikan IndexedDB tanpa menulis ulang parser/UI.
-
-> Catatan: file contoh `Demo_Personil_3000_Baris-2.xlsx` memakai sheet bernama "Data Demo", sehingga perlu diubah menjadi `Database` dulu (salinan siap pakai `Demo_Personil_3000_Baris-Database.xlsx` sudah dibuat di folder Downloads). Download template ber-sheet `Database` tersedia di halaman Import.
+- Workbook dengan header berubah urutan atau kolom tambahan dipetakan berdasarkan nama header. Header berulang dipasangkan berdasarkan urutan kemunculannya; kolom yang hilang menjadi kosong/NEEDS_REVIEW, bukan digeser secara positional. Warning struktur header disembunyikan sementara untuk kebutuhan demo.
+- Re-import identik idempotent berdasarkan normalized Personnel ID + fingerprint. Konflik NoKTP tidak di-merge otomatis dan tetap berada di review queue.
+- Critical field yang kosong/tidak dikenal dan mutation historis memakai guardrail `NEEDS_REVIEW`; import tidak otomatis berarti validasi HR atau kontrak `SIGNED`.
+- Import Area Supporting dibatasi sebelum reconciliation dan reference discovery. Preview memisahkan valid dalam scope, warning/review, error, dan di luar scope. Baris luar scope diberi status **“Di luar cakupan area — tidak diimpor.”**, tidak dikomit, dan tidak dapat membuat Area/Project baru.
+- Hanya `.xlsx` yang didukung. `.xls` harus disimpan ulang sebagai `.xlsx`.
+- Pipeline aktif berada di `src/lib/import/` (`columns`, `normalizers`, `workbook`, `mapping`, `parse`, `classify`, `reconcile`, `repository`, `service`).
 
 ## Vercel
 
@@ -89,6 +92,19 @@ Repository menyertakan `vercel.json` untuk SPA deep-link rewrite ke `index.html`
 
 Dashboard memakai istilah **Turnover** dan **Vacant** serta target fulfillment ≤ 3 hari kerja. Reference CSV di `docs/reference/` dipakai untuk membaca **header saja**; tidak ada baris employee referensi dalam aplikasi. Quota per project/bulan, Turnover %, Monthly Index, dan Pengakhiran Perjanjian adalah interpretasi demo yang perlu konfirmasi Gelatik. Lihat [V3 change log](docs/DEMO_V3_CHANGELOG.md) untuk flow presentasi dan formula.
 
+## Demo RBAC
+
+Permission dikelompokkan menjadi Monitoring, Employee, Import & Export, Validation, Replacement & Fulfillment, Project, dan Administrasi. Sidebar, route, tombol, serta action pada `DemoContext` membaca konfigurasi yang sama. Scope memakai label **Area Sendiri**, **Area Terpilih**, atau **Semua Area**.
+
+- Area Supporting: data entry own-area, import own-area, movement/exit/re-entry, serta monitoring project/replacement; tidak memvalidasi atau melakukan matching/fulfillment secara default.
+- HR Head Office: semua area, employee/import/review/validation/project/replacement/export; tidak mendapat konfigurasi role secara default.
+- Operations Manager dan Management: read-only untuk dashboard, analytics, employee, movement, project, replacement, dan export.
+- Super Admin: seluruh permission aktif; permission administrasi inti dikunci agar akses konfigurasi tidak terputus.
+
+Konfigurasi lama berbasis permission luas (`edit_employee`, `create_exit`, `validate_employee`, `validate_exit`) dimigrasikan saat startup. `manage_users` tidak ditampilkan karena belum ada fitur User Management nyata. Permission Import Excel tidak otomatis memberikan permission membuat employee manual.
+
+> Konfigurasi role pada prototype digunakan untuk simulasi kebutuhan. Struktur permission dan otorisasi production akan ditentukan kembali bersama PT Gelatik Supra.
+
 ## Batasan penting
 
-Prototype ini tidak menyediakan production authentication/authorization, sinkronisasi antarperangkat, database, audit guarantee, public-holiday calculation, BPJS integration, file storage, atau external notification. Exact matching, SLA tiga hari, calendar Senin–Jumat, contract gate, cross-area behavior, validation ownership, dan flag treatment masih **DEMO ASSUMPTION / TBC**.
+Prototype ini tidak menyediakan production authentication/authorization, sinkronisasi antarperangkat, database, audit guarantee, public-holiday calculation, BPJS integration, file storage, atau external notification. RBAC dan scope berbasis frontend/localStorage mencegah aksi di dalam demo, tetapi bukan batas keamanan production. Exact matching, SLA tiga hari, calendar Senin–Jumat, contract gate, cross-area behavior, validation ownership, quota manual vs turunan master, dan flag treatment masih **DEMO ASSUMPTION / TBC**.
