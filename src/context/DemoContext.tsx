@@ -278,6 +278,8 @@ export interface DemoContextValue extends DemoData {
   importEmployees: (employees: Employee[]) => void
   /** Imported personnel persisted in IndexedDB (source of truth for the Excel import feature). */
   importedPersonnel: StoredPersonnel[]
+  /** Uncollapsed current master records for read-only aggregate quality checks. */
+  actualManpowerRecords: Employee[]
   importBatches: ImportBatch[]
   importExceptions: ImportException[]
   importReviewItems: ReviewItem[]
@@ -414,6 +416,11 @@ export function DemoProvider({ children }: { children: ReactNode }) {
     return [...map.values()]
   }, [importedPersonnel, state.employees])
 
+  const actualManpowerRecords = useMemo(() => [
+    ...state.employees,
+    ...importedPersonnel.map((personnel) => personnel.employee),
+  ], [state.employees, importedPersonnel])
+
   const historicalWorkforce = useMemo(
     () => deriveHistoricalWorkforce(importedPersonnel.map((personnel) => personnel.employee)),
     [importedPersonnel],
@@ -464,7 +471,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
 
   const value: DemoContextValue = {
     dataMode, areas: state.areas, projects: state.projects, projectQuotas: state.projectQuotas, employees: combinedEmployees, employeeExits: combinedEmployeeExits, replacementNeeds: combinedReplacementNeeds, movements: state.movements, employeeMovements: combinedMovements, movementRequests: state.movementRequests, employeeNotes: state.employeeNotes, employeeFlags: state.employeeFlags, permissionConfig: state.permissionConfig, validationPolicy: state.validationPolicy, currentUser,
-    importedPersonnel, importBatches, importExceptions, importReviewItems, importSourceRecords, importStorageReady, importStorageError, canImportPersonnel, importPersonnelFile, preparePersonnelImport, confirmPersonnelImport, refreshPersonnel, pendingReviewFor,
+    importedPersonnel, actualManpowerRecords, importBatches, importExceptions, importReviewItems, importSourceRecords, importStorageReady, importStorageError, canImportPersonnel, importPersonnelFile, preparePersonnelImport, confirmPersonnelImport, refreshPersonnel, pendingReviewFor,
     login: (email, password) => {
       const user = demoUsers.find((item) => item.email.toLowerCase() === email.toLowerCase().trim() && item.password === password)
       if (!user) return false

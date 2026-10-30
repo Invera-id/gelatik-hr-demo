@@ -20,6 +20,26 @@ const toSheetData = ({ headers, rows }: ExportTable): SheetData => [
   ...rows.map((row) => row.map((value) => value ?? '')),
 ]
 
+export interface ExportWorkbookSheet extends ExportTable {
+  name: string
+}
+
+/** Shared multi-sheet writer. Throws on failure: never silently loses audit sheets. */
+export const createBusinessWorkbook = async (sheets: ExportWorkbookSheet[]) => {
+  const { default: writeXlsxFile } = await import('write-excel-file/browser')
+  return writeXlsxFile(sheets.map((sheet) => ({
+    sheet: sheet.name,
+    data: toSheetData(sheet),
+    columns: sheet.headers.map((header) => ({ width: Math.max(18, Math.min(42, header.length + 5)) })),
+    stickyRowsCount: 1,
+  })))
+}
+
+export const exportBusinessWorkbook = async (sheets: ExportWorkbookSheet[], fileName: string) => {
+  const workbook = await createBusinessWorkbook(sheets)
+  await workbook.toFile(fileName)
+}
+
 const downloadCsv = ({ headers, rows }: ExportTable, fileName: string) => {
   const escape = (value: ExportValue) => `"${String(value ?? '').replaceAll('"', '""')}"`
   const csv = [headers, ...rows].map((row) => row.map(escape).join(',')).join('\r\n')
