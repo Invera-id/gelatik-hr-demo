@@ -21,6 +21,7 @@ import { NotificationsPage } from './pages/NotificationsPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { ProjectDetailPage } from './pages/ProjectDetailPage'
 import { AnalyticsPage } from './pages/AnalyticsPage'
+import { FinanceTargetActualPage } from './features/finance-target-actual/FinanceTargetActualPage'
 import { hasPermission } from './config/access'
 import type { Permission } from './types'
 
@@ -52,6 +53,7 @@ export default function App() {
       <Route path="projects" element={<PermissionRoute permission="view_project"><ProjectsPage /></PermissionRoute>} />
       <Route path="projects/:projectId" element={<PermissionRoute permission="view_project"><ProjectDetailPage /></PermissionRoute>} />
       <Route path="reports/analytics" element={<PermissionRoute permission="view_analytics"><AnalyticsPage /></PermissionRoute>} />
+      <Route path="reports/finance-target-actual" element={<PermissionRoute permission="view_analytics"><FinanceTargetActualPage /></PermissionRoute>} />
       <Route path="validation" element={<PermissionRoute permission={['validate_employee_entry_edit', 'validate_placement_change', 'validate_employee_exit']}><ValidationPage /></PermissionRoute>} />
       <Route path="replacements" element={<PermissionRoute permission="view_replacement"><ReplacementsPage /></PermissionRoute>} />
       <Route path="replacements/:needId" element={<PermissionRoute permission="view_replacement"><ReplacementDetailPage /></PermissionRoute>} />

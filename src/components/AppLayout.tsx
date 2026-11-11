@@ -1,4 +1,4 @@
-import { BarChart3, Bell, BriefcaseBusiness, ChevronDown, ClipboardCheck, Download, FileUp, History, KeyRound, LogOut, Menu, RotateCcw, Settings2, UserPlus, Users, X } from 'lucide-react'
+import { BarChart3, Bell, BriefcaseBusiness, ChevronDown, ClipboardCheck, Download, FileUp, GitCompareArrows, History, KeyRound, LogOut, Menu, RotateCcw, Settings2, UserPlus, Users, X } from 'lucide-react'
 import { useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { roleLabels } from '../lib/businessRules'
@@ -14,6 +14,7 @@ const navItems: Array<{ to: string; label: string; icon: typeof BarChart3; permi
   { to: '/employees', label: term.employeeMaster, icon: Users, permission: 'view_employee' },
   { to: '/projects', label: 'Projects', icon: BriefcaseBusiness, permission: 'view_project' },
   { to: '/reports/analytics', label: 'Analytics / Reports', icon: BarChart3, permission: 'view_analytics' },
+  { to: '/reports/finance-target-actual', label: 'Finance Target vs Actual', icon: GitCompareArrows, permission: 'view_analytics' },
   { to: '/employees/new', label: term.employeeEntry, icon: UserPlus, permission: 'create_employee' },
   { to: '/import', label: 'Import Excel', icon: FileUp, permission: ['import_personnel', 'view_import_review'] },
   { to: '/notifications', label: 'Notifikasi', icon: Bell, permission: 'view_notifications' },
