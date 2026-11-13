@@ -1,0 +1,13 @@
+# Build context is apps/api and the Dockerfile copies it whole (COPY . .): keep secrets,
+# local data and build output out of the image.
+.env
+.env.*
+var/
+bin/
+*.test
+coverage*
+*.log
+*.xlsx
+*.xls
+*.csv
+.DS_Store

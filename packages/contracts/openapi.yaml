@@ -1,0 +1,1346 @@
+openapi: 3.1.0
+info:
+  title: Gelatik HR API
+  version: 0.1.0
+  description: |
+    Internal API for GELATIK HR PROJEK (workforce monitoring for PT Gelatik Supra).
+    Authentication uses an opaque server-side session in an HttpOnly cookie.
+    Every state-changing request must send the `X-CSRF-Token` header returned by
+    `/auth/login` or `/auth/me`. Role, permissions and area scope are always derived
+    from the authenticated session on the server; request bodies never grant access.
+    Records outside the caller's area scope respond with 404.
+servers:
+  - url: /api/v1
+security:
+  - session: []
+tags:
+  - name: auth
+  - name: workspace
+  - name: employees
+  - name: workflow
+  - name: replacements
+  - name: projects
+  - name: imports
+  - name: notifications
+  - name: settings
+  - name: documents
+  - name: reports
+  - name: ops
+
+paths:
+  /health:
+    get:
+      tags: [ops]
+      security: []
+      operationId: health
+      responses:
+        '200': { description: Process is alive, content: { application/json: { schema: { $ref: '#/components/schemas/Status' } } } }
+  /ready:
+    get:
+      tags: [ops]
+      security: []
+      operationId: ready
+      responses:
+        '200': { description: Database reachable and migrations applied, content: { application/json: { schema: { $ref: '#/components/schemas/Status' } } } }
+        '503': { description: Not ready, content: { application/json: { schema: { $ref: '#/components/schemas/Status' } } } }
+
+  /auth/login:
+    post:
+      tags: [auth]
+      security: []
+      operationId: login
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } }
+      responses:
+        '200': { description: Session created (Set-Cookie), content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      responses:
+        '204': { description: Session revoked }
+  /auth/me:
+    get:
+      tags: [auth]
+      operationId: me
+      responses:
+        '200': { description: Current user, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        '401': { $ref: '#/components/responses/Error' }
+
+  /workspace:
+    get:
+      tags: [workspace]
+      operationId: getWorkspace
+      responses:
+        '200': { description: Reference data, content: { application/json: { schema: { $ref: '#/components/schemas/Workspace' } } } }
+  /snapshot:
+    get:
+      tags: [workspace]
+      operationId: getSnapshot
+      description: Scoped operational dataset (reduced profiles) used by analytics-style pages.
+      responses:
+        '200': { description: Snapshot, content: { application/json: { schema: { $ref: '#/components/schemas/Snapshot' } } } }
+  /dashboard:
+    get:
+      tags: [reports]
+      operationId: getDashboard
+      parameters:
+        - { name: dateFrom, in: query, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, schema: { type: string, format: date } }
+        - { name: areaId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: position, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [OPEN, MATCHED, FULFILLED, OVER_TARGET] } }
+      responses:
+        '200': { description: KPI, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardKPI' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /dashboard/compliance:
+    get:
+      tags: [reports]
+      operationId: getCompliance
+      description: |
+        Contract and document KPIs, aggregated on the server after scope is applied, using the same
+        functions as `/contracts/monitoring` and `/documents/queue`. Only `areaId` filters these figures;
+        the dashboard date range does not apply. `contracts`/`documents` are null without `view_employee`.
+      parameters:
+        - { name: areaId, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Summary, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceSummary' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+  /exports/{kind}:
+    get:
+      tags: [reports]
+      operationId: exportReport
+      parameters:
+        - { name: kind, in: path, required: true, schema: { type: string, enum: [employee, movement, turnover, replacement, dashboard] } }
+        - { name: dateFrom, in: query, schema: { type: string, format: date } }
+        - { name: dateTo, in: query, schema: { type: string, format: date } }
+        - { name: areaId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Spreadsheet (text cells starting with = + - @ are neutralized)
+          content: { application/vnd.openxmlformats-officedocument.spreadsheetml.sheet: { schema: { type: string, format: binary } } }
+        '403': { $ref: '#/components/responses/Error' }
+
+  /employees:
+    get:
+      tags: [employees]
+      operationId: listEmployees
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 25 } }
+        - { name: q, in: query, description: Personnel ID or name contains, schema: { type: string } }
+        - { name: areaId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: clientName, in: query, schema: { type: string } }
+        - { name: employmentStatus, in: query, schema: { $ref: '#/components/schemas/EmploymentStatus' } }
+        - { name: validationStatus, in: query, schema: { $ref: '#/components/schemas/ValidationStatus' } }
+        - { name: tab, in: query, schema: { type: string, enum: [active] } }
+        - { name: sort, in: query, schema: { type: string, enum: [personnelId, -personnelId, name, -name, joinDate, -joinDate, updatedAt, -updatedAt] } }
+      responses:
+        '200': { description: Page, content: { application/json: { schema: { $ref: '#/components/schemas/EmployeePage' } } } }
+        '422': { $ref: '#/components/responses/Error' }
+    post:
+      tags: [workflow]
+      operationId: createEmployee
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EntryInput' } } } }
+      responses:
+        '201': { description: Created (not effective until validated), content: { application/json: { schema: { $ref: '#/components/schemas/Employee' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /employees/validate-bulk:
+    post:
+      tags: [workflow]
+      operationId: bulkValidateEntries
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [ids], properties: { ids: { type: array, items: { type: string }, maxItems: 1000 } } } } }
+      responses:
+        '200': { description: Number validated, content: { application/json: { schema: { type: object, required: [validated], properties: { validated: { type: integer } } } } } }
+  /employees/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [employees]
+      operationId: getEmployee
+      responses:
+        '200': { description: Detail, content: { application/json: { schema: { $ref: '#/components/schemas/EmployeeDetail' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+    put:
+      tags: [workflow]
+      operationId: updateEmployee
+      description: Revises an unvalidated entry, or creates/updates a basic-edit request for a validated record.
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/EntryInput' } } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/Employee' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /employees/{id}/validation:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [workflow]
+      operationId: validateEntry
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Decision' } } } }
+      responses:
+        '204': { description: Decided }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /employees/{id}/exit-request:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [workflow]
+      operationId: saveExitRequest
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ExitInput' } } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/EmployeeExit' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /employees/{id}/movement-request:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [workflow]
+      operationId: saveMovementRequest
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/MovementInput' } } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/PlacementChangeRequest' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /employees/{id}/reentry:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [workflow]
+      operationId: reentryEmployee
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReentryInput' } } } }
+      responses:
+        '200': { description: Re-activated (same identity, new employment period), content: { application/json: { schema: { $ref: '#/components/schemas/Employee' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /employees/{id}/notes:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [employees]
+      operationId: addNote
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/NoteInput' } } } }
+      responses:
+        '204': { description: Added (idempotent per clientRef) }
+  /employees/{id}/flags:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [employees]
+      operationId: setFlag
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/FlagInput' } } } }
+      responses:
+        '204': { description: Added (idempotent per clientRef) }
+  /change-requests/{id}/validation:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [workflow]
+      operationId: validateChangeRequest
+      description: Decides a basic-edit, placement-change or exit request. Stale requests return 409 STALE_REQUEST.
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/Decision' } } } }
+      responses:
+        '204': { description: Decided }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+
+  /contracts/monitoring:
+    get:
+      tags: [reports]
+      operationId: getContractMonitoring
+      description: Personnel counted once each (current contract). Status is derived only from the contract end date and the configured reminder thresholds, on the Asia/Jakarta business date.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [ACTION, EXPIRING, EXPIRED, INCOMPLETE, ALL], default: ACTION } }
+        - { name: areaId, in: query, schema: { type: string } }
+        - { name: projectId, in: query, schema: { type: string } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+      responses:
+        '200': { description: Monitoring, content: { application/json: { schema: { $ref: '#/components/schemas/ContractMonitoring' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /employees/{id}/documents:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [documents]
+      operationId: getEmployeeDocuments
+      responses:
+        '200': { description: Documents per validation subject, content: { application/json: { schema: { type: object, required: [subjects], properties: { subjects: { type: array, items: { $ref: '#/components/schemas/SubjectDocuments' } } } } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /documents/catalog:
+    get:
+      tags: [documents]
+      operationId: getDocumentCatalog
+      responses:
+        '200': { description: Catalog, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentCatalog' } } } }
+  /documents/queue:
+    get:
+      tags: [documents]
+      operationId: getDocumentQueue
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [ALL, INCOMPLETE, PENDING_REVIEW, REJECTED], default: ALL } }
+        - { name: areaId, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Open submissions, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentQueue' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /documents/employee-status:
+    get:
+      tags: [documents]
+      operationId: getEmployeeDocumentStatus
+      description: Active employees in scope without an accepted PKWT (the fixed employee document). Warning only.
+      parameters: [{ name: areaId, in: query, schema: { type: string } }]
+      responses:
+        '200': { description: Status, content: { application/json: { schema: { $ref: '#/components/schemas/EmployeeDocumentStatus' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+  /validation/readiness:
+    get:
+      tags: [documents]
+      operationId: getValidationReadiness
+      description: Pre-check of every submitted entry in scope (blocking and informational issues) so HR can review before validating. Requires view_employee and validate_employee_entry_edit.
+      responses:
+        '200': { description: Readiness, content: { application/json: { schema: { $ref: '#/components/schemas/ValidationReadiness' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+  /documents/subjects/{subjectType}/{subjectId}/{documentType}:
+    parameters:
+      - { name: subjectType, in: path, required: true, schema: { $ref: '#/components/schemas/DocumentSubjectType' } }
+      - { name: subjectId, in: path, required: true, schema: { type: string } }
+      - { name: documentType, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [documents]
+      operationId: uploadDocument
+      description: Adds a new version (always PENDING_REVIEW) and supersedes the current one. The type is verified from file content; size and types are server configuration.
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } }
+      responses:
+        '201': { description: Uploaded, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentVersion' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /documents/versions/{id}/review:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [documents]
+      operationId: reviewDocument
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentReview' } } } }
+      responses:
+        '200': { description: Reviewed, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentVersion' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /documents/versions/{id}/content:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [documents]
+      operationId: getDocumentContent
+      description: Streams the private file as an attachment (no-store). Requires view_employee plus upload_documents or review_documents, and scope.
+      responses:
+        '200': { description: File, content: { application/octet-stream: { schema: { type: string, format: binary } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /replacements/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [replacements]
+      operationId: getReplacementNeed
+      responses:
+        '200': { description: Need with chain and server-evaluated candidates, content: { application/json: { schema: { $ref: '#/components/schemas/NeedDetail' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /replacements/{id}/match:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [replacements]
+      operationId: matchCandidate
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [employeeId], properties: { employeeId: { type: string }, expectedVersion: { type: integer } } } } }
+      responses:
+        '200': { description: Matched, content: { application/json: { schema: { $ref: '#/components/schemas/ReplacementNeed' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /replacements/{id}/fulfill:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [replacements]
+      operationId: fulfillNeed
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, properties: { expectedVersion: { type: integer } } } } } }
+      responses:
+        '200': { description: Fulfilled, content: { application/json: { schema: { $ref: '#/components/schemas/ReplacementNeed' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /projects:
+    post:
+      tags: [projects]
+      operationId: createProject
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectInput' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+  /projects/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      tags: [projects]
+      operationId: updateProject
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectInput' } } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
+  /projects/{id}/status:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [projects]
+      operationId: setProjectStatus
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string, enum: [ACTIVE, INACTIVE] } } } } } }
+      responses:
+        '204': { description: Updated }
+  /projects/{id}/quotas/{period}:
+    parameters:
+      - { $ref: '#/components/parameters/Id' }
+      - { name: period, in: path, required: true, schema: { type: string, pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } }
+    put:
+      tags: [projects]
+      operationId: saveProjectQuota
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [quota], properties: { quota: { type: integer, minimum: 0 } } } } } }
+      responses:
+        '204': { description: Saved }
+
+  /imports:
+    get:
+      tags: [imports]
+      operationId: getImportOverview
+      parameters:
+        - { name: status, in: query, description: Comma-separated review statuses, schema: { type: string } }
+      responses:
+        '200': { description: Batches, scoped review queue and referenced source records, content: { application/json: { schema: { $ref: '#/components/schemas/ImportOverview' } } } }
+  /imports/previews:
+    post:
+      tags: [imports]
+      operationId: previewImport
+      description: Parses and reconciles on the server; stages the plan bound to the caller for a limited time. No business data changes.
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { type: object, required: [file], properties: { file: { type: string, format: binary } } }
+      responses:
+        '200': { description: Preview, content: { application/json: { schema: { $ref: '#/components/schemas/ImportPreview' } } } }
+        '413': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /imports/commit:
+    post:
+      tags: [imports]
+      operationId: commitImport
+      description: Atomic, idempotent commit. 409 SCOPE_CHANGED / PREVIEW_STALE when scope or data changed; 410 when expired.
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PreviewRef' } } } }
+      responses:
+        '200': { description: Committed, content: { application/json: { schema: { $ref: '#/components/schemas/ImportCommit' } } } }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }
+  /imports/cancel:
+    post:
+      tags: [imports]
+      operationId: cancelImport
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/PreviewRef' } } } }
+      responses:
+        '204': { description: Discarded }
+  /imports/batches/{id}/exceptions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      tags: [imports]
+      operationId: getBatchExceptions
+      responses:
+        '200': { description: Rejected rows, content: { application/json: { schema: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/ImportException' } } } } } } }
+  /imports/reviews/{id}/decision:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      tags: [imports]
+      operationId: decideReview
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/ReviewDecision' } } } }
+      responses:
+        '204': { description: Decided }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+
+  /notifications:
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+        - { name: unread, in: query, schema: { type: boolean }, description: Only unread }
+        - { name: category, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: Own notifications, newest first
+          content:
+            application/json:
+              schema: { type: object, required: [items, unreadCount, total], properties: { items: { type: array, items: { $ref: '#/components/schemas/Notification' } }, unreadCount: { type: integer }, total: { type: integer, description: Notifications matching the filter (for paging) } } }
+  /notifications/mark:
+    post:
+      tags: [notifications]
+      operationId: markNotifications
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [action], properties: { ids: { type: array, items: { type: string }, description: 1–500 ids; omit when all is true }, action: { type: string, enum: [read, archive] }, all: { type: boolean, description: 'With action read: mark every visible unread notification of the caller' } } } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { type: object, properties: { updated: { type: integer } } } } } }
+        '400': { $ref: '#/components/responses/Error' }
+
+  /settings/roles/{role}:
+    parameters: [{ name: role, in: path, required: true, schema: { $ref: '#/components/schemas/Role' } }]
+    put:
+      tags: [settings]
+      operationId: updateRoleConfig
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/RoleConfigInput' } } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/PermissionConfigResponse' } } } }
+        '409': { $ref: '#/components/responses/Error' }
+  /settings/roles/reset:
+    post:
+      tags: [settings]
+      operationId: resetRoleConfigs
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      responses:
+        '200': { description: Reset, content: { application/json: { schema: { $ref: '#/components/schemas/PermissionConfigResponse' } } } }
+  /settings/validation-policy/{transaction}:
+    parameters: [{ name: transaction, in: path, required: true, schema: { $ref: '#/components/schemas/TransactionType' } }]
+    put:
+      tags: [settings]
+      operationId: setValidationPolicy
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [authority], properties: { authority: { type: string, enum: [AREA_ADMIN, HR_HO, BOTH] } } } } } }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { type: object, properties: { validationPolicy: { $ref: '#/components/schemas/ValidationPolicy' } } } } } }
+  /settings/contract-monitoring:
+    get:
+      tags: [settings]
+      operationId: getContractSettings
+      responses:
+        '200': { description: Settings, content: { application/json: { schema: { $ref: '#/components/schemas/ContractSettings' } } } }
+    put:
+      tags: [settings]
+      operationId: saveContractSettings
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [reminderDays], properties: { reminderDays: { type: array, items: { type: integer, minimum: 1, maximum: 366 }, minItems: 1, maxItems: 5 } } } } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/ContractSettings' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /settings/document-types/{code}:
+    parameters: [{ name: code, in: path, required: true, schema: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,39}$' } }]
+    put:
+      tags: [settings]
+      operationId: saveDocumentType
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentTypeInput' } } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentCatalog' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /settings/document-requirements/{transaction}:
+    parameters: [{ name: transaction, in: path, required: true, schema: { $ref: '#/components/schemas/TransactionType' } }]
+    put:
+      tags: [settings]
+      operationId: saveDocumentRequirements
+      description: Replaces the set of document types required before final validation of this transaction type. Employee documents (PKWT) are fixed and not configurable here.
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [documentTypeCodes], properties: { documentTypeCodes: { type: array, items: { type: string } } } } } } }
+      responses:
+        '200': { description: Saved, content: { application/json: { schema: { $ref: '#/components/schemas/DocumentCatalog' } } } }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /users:
+    get:
+      tags: [settings]
+      operationId: listUsers
+      responses:
+        '200': { description: Users, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/UserAdmin' } } } } } } }
+    post:
+      tags: [settings]
+      operationId: createUser
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UserInput' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { type: object, properties: { id: { type: string } } } } } }
+  /users/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      tags: [settings]
+      operationId: updateUser
+      parameters: [{ $ref: '#/components/parameters/CSRF' }]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UserInput' } } } }
+      responses:
+        '204': { description: Updated (sessions revoked on deactivation/password change) }
+        '409': { $ref: '#/components/responses/Error' }
+
+components:
+  securitySchemes:
+    session: { type: apiKey, in: cookie, name: gelatik_session }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string } }
+    CSRF: { name: X-CSRF-Token, in: header, required: true, schema: { type: string } }
+  responses:
+    Error:
+      description: Error envelope
+      content: { application/json: { schema: { $ref: '#/components/schemas/ErrorResponse' } } }
+  schemas:
+    Status: { type: object, required: [status], properties: { status: { type: string }, reason: { type: string } } }
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: { type: string, examples: [UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, VALIDATION_FAILED, CSRF_FAILED, STALE_VERSION, STALE_REQUEST, ALREADY_DECIDED, INVALID_STATE, PREVIEW_STALE, SCOPE_CHANGED, DOCUMENTS_INCOMPLETE, STALE_DOCUMENT, STORAGE_FAILED] }
+            message: { type: string }
+            fields: { type: object, additionalProperties: { type: string } }
+            requestId: { type: string }
+    Role: { type: string, enum: [AREA_SUPPORT, HR_HO, OPERATIONS_MANAGER, MANAGEMENT, SUPER_ADMIN] }
+    Scope: { type: string, enum: [OWN_AREA, SELECTED_AREAS, ALL_AREAS] }
+    Permission:
+      type: string
+      enum: [view_dashboard, view_analytics, view_notifications, view_employee, create_employee, edit_employee_basic, request_placement_change, request_employee_exit, reentry_employee, manage_employee_notes_flags, view_movement_history, import_personnel, view_import_review, resolve_import_review, export_data, validate_employee_entry_edit, validate_placement_change, validate_employee_exit, bulk_validate, view_replacement, match_replacement, fulfill_replacement, view_project, manage_project, toggle_project_status, manage_project_quota, manage_roles, manage_validation_policy, reset_demo_data, upload_documents, review_documents, manage_document_requirements, manage_contract_monitoring]
+    TransactionType: { type: string, enum: [EMPLOYEE_ENTRY, EMPLOYEE_BASIC_EDIT, EMPLOYEE_PLACEMENT_CHANGE, EMPLOYEE_EXIT] }
+    ValidationStatus: { type: string, enum: [DRAFT, SUBMITTED, VALIDATED, REVISION_REQUIRED] }
+    EmploymentStatus: { type: string, enum: [ACTIVE, INACTIVE] }
+    ContractStatus: { type: string, enum: [NOT_AVAILABLE, DRAFT, SIGNED] }
+    NullableString: { type: [string, 'null'] }
+    LoginRequest: { type: object, required: [email, password], properties: { email: { type: string }, password: { type: string } } }
+    UserSummary:
+      type: object
+      required: [id, name, role, areaId]
+      properties: { id: { type: string }, name: { type: string }, role: { $ref: '#/components/schemas/Role' }, areaId: { $ref: '#/components/schemas/NullableString' } }
+    Me:
+      type: object
+      required: [user, email, permissions, scope, allowedAreaIds, csrfToken]
+      properties:
+        user: { $ref: '#/components/schemas/UserSummary' }
+        email: { type: string }
+        permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+        scope: { $ref: '#/components/schemas/Scope' }
+        allowedAreaIds: { type: [array, 'null'], items: { type: string }, description: null means all areas }
+        csrfToken: { type: string }
+    Area: { type: object, required: [id, name], properties: { id: { type: string }, name: { type: string } } }
+    Project:
+      type: object
+      required: [id, name, clientName, areaId, subArea, status, startDate, endDate]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        clientName: { type: string }
+        areaId: { type: string }
+        subArea: { $ref: '#/components/schemas/NullableString' }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        startDate: { $ref: '#/components/schemas/NullableString' }
+        endDate: { $ref: '#/components/schemas/NullableString' }
+    ProjectInput:
+      type: object
+      required: [name, clientName, areaId]
+      properties:
+        name: { type: string }
+        clientName: { type: string }
+        areaId: { type: string }
+        subArea: { $ref: '#/components/schemas/NullableString' }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+        startDate: { $ref: '#/components/schemas/NullableString' }
+        endDate: { $ref: '#/components/schemas/NullableString' }
+    ProjectQuota: { type: object, required: [id, projectId, period, quota], properties: { id: { type: string }, projectId: { type: string }, period: { type: string }, quota: { type: integer } } }
+    RoleConfig:
+      type: object
+      required: [role, scope, selectedAreaIds, permissions]
+      properties:
+        role: { $ref: '#/components/schemas/Role' }
+        scope: { $ref: '#/components/schemas/Scope' }
+        selectedAreaIds: { type: array, items: { type: string } }
+        permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+    RoleConfigInput:
+      type: object
+      required: [scope, permissions]
+      properties:
+        scope: { $ref: '#/components/schemas/Scope' }
+        selectedAreaIds: { type: array, items: { type: string } }
+        permissions: { type: array, items: { $ref: '#/components/schemas/Permission' } }
+    PermissionConfigResponse: { type: object, required: [permissionConfig], properties: { permissionConfig: { type: array, items: { $ref: '#/components/schemas/RoleConfig' } } } }
+    ValidationPolicy:
+      type: object
+      additionalProperties: { type: string, enum: [AREA_ADMIN, HR_HO, BOTH] }
+    Workspace:
+      type: object
+      required: [businessDate, areas, projects, projectQuotas, permissionConfig, validationPolicy, users]
+      properties:
+        businessDate: { type: string, format: date, description: Today in Asia/Jakarta }
+        areas: { type: array, items: { $ref: '#/components/schemas/Area' } }
+        projects: { type: array, items: { $ref: '#/components/schemas/Project' } }
+        projectQuotas: { type: array, items: { $ref: '#/components/schemas/ProjectQuota' } }
+        permissionConfig: { type: array, items: { $ref: '#/components/schemas/RoleConfig' } }
+        validationPolicy: { $ref: '#/components/schemas/ValidationPolicy' }
+        users: { type: array, items: { $ref: '#/components/schemas/UserSummary' } }
+    PendingChange:
+      type: object
+      required: [requestId, status, proposed, baseVersion]
+      properties:
+        requestId: { type: string }
+        status: { $ref: '#/components/schemas/ValidationStatus' }
+        proposed: { type: object, additionalProperties: true }
+        baseVersion: { type: integer }
+    Employee:
+      type: object
+      required: [id, personnelId, name, areaId, subArea, projectId, position, employmentStatus, conditionStatus, joinDate, contractStartDate, contractEndDate, contractStatus, bpjsStatus, createdBy, validationStatus, validatedBy, validatedAt, submittedAt, revisionNote, source, version, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        personnelId: { type: string, description: Always a string }
+        name: { type: string }
+        areaId: { $ref: '#/components/schemas/NullableString' }
+        subArea: { $ref: '#/components/schemas/NullableString' }
+        projectId: { $ref: '#/components/schemas/NullableString' }
+        position: { $ref: '#/components/schemas/NullableString' }
+        employmentStatus: { $ref: '#/components/schemas/EmploymentStatus' }
+        conditionStatus: { type: string, enum: [CONFIRMED, NEEDS_REVIEW] }
+        joinDate: { $ref: '#/components/schemas/NullableString' }
+        contractStartDate: { $ref: '#/components/schemas/NullableString' }
+        contractEndDate: { $ref: '#/components/schemas/NullableString' }
+        contractStatus: { $ref: '#/components/schemas/ContractStatus' }
+        bpjsStatus: { $ref: '#/components/schemas/NullableString' }
+        profile: { type: object, additionalProperties: true }
+        createdBy: { type: string }
+        validationStatus: { $ref: '#/components/schemas/ValidationStatus' }
+        validationTransaction: { type: string, enum: [EMPLOYEE_ENTRY, EMPLOYEE_BASIC_EDIT] }
+        validatedBy: { $ref: '#/components/schemas/NullableString' }
+        validatedAt: { type: [string, 'null'], format: date-time }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        revisionNote: { $ref: '#/components/schemas/NullableString' }
+        source: { type: string, enum: [MANUAL, IMPORT] }
+        version: { type: integer }
+        pendingChange: { $ref: '#/components/schemas/PendingChange' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    EmployeePage:
+      type: object
+      required: [items, total, page, pageSize]
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Employee' } }, total: { type: integer }, page: { type: integer }, pageSize: { type: integer } }
+    EntryInput:
+      type: object
+      required: [personnelId, name, contractStatus]
+      properties:
+        personnelId: { type: string }
+        name: { type: string }
+        areaId: { $ref: '#/components/schemas/NullableString' }
+        projectId: { $ref: '#/components/schemas/NullableString' }
+        position: { $ref: '#/components/schemas/NullableString' }
+        subArea: { $ref: '#/components/schemas/NullableString' }
+        joinDate: { $ref: '#/components/schemas/NullableString' }
+        contractStartDate: { $ref: '#/components/schemas/NullableString' }
+        contractEndDate: { $ref: '#/components/schemas/NullableString' }
+        contractStatus: { $ref: '#/components/schemas/ContractStatus' }
+        bpjsStatus: { $ref: '#/components/schemas/NullableString' }
+        height:
+          description: Tinggi badan in cm as typed ("165", "165,5", "165 cm"); max 2 decimals, > 0. Omit to keep the stored value; null or "" clears it.
+          type: [string, 'null']
+        weight:
+          description: Berat badan in kg as typed ("60", "60,5", "60 kg"); max 2 decimals, > 0. Omit to keep the stored value; null or "" clears it.
+          type: [string, 'null']
+        submit: { type: boolean }
+        expectedVersion: { type: integer }
+    Decision:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [VALIDATED, REVISION_REQUIRED] }
+        note: { type: string }
+        expectedVersion: { type: integer }
+    ExitInput:
+      type: object
+      required: [exitDate, exitReason, replacementRequired]
+      properties: { exitDate: { type: string, format: date }, exitReason: { type: string }, replacementRequired: { type: boolean }, submit: { type: boolean } }
+    MovementInput:
+      type: object
+      required: [movementType, effectiveDate, newAreaId, newProjectId, newPosition]
+      properties:
+        movementType: { type: string, enum: [PROMOTION, MUTATION, AREA_CHANGE, PROJECT_CHANGE, POSITION_CHANGE] }
+        effectiveDate: { type: string, format: date }
+        newAreaId: { type: string }
+        newProjectId: { type: string }
+        newPosition: { type: string }
+        notes: { type: string }
+        submit: { type: boolean }
+        expectedVersion: { type: integer }
+    ReentryInput:
+      type: object
+      required: [areaId, projectId, position, joinDate]
+      properties: { areaId: { type: string }, projectId: { type: string }, position: { type: string }, joinDate: { type: string, format: date }, notes: { type: string } }
+    NoteInput: { type: object, required: [notes], properties: { notes: { type: string }, clientRef: { type: string, format: uuid } } }
+    FlagInput:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [NORMAL, REVIEW_REQUIRED, FLAGGED] }, reason: { type: string }, notes: { type: string }, clientRef: { type: string, format: uuid } }
+    EmployeeExit:
+      type: object
+      required: [id, employeeId, exitDate, exitReason, replacementRequired, createdBy, validationStatus, validatedBy, validatedAt, submittedAt, revisionNote, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        employeeId: { type: string }
+        exitDate: { type: string, format: date }
+        exitReason: { type: string }
+        replacementRequired: { type: boolean }
+        createdBy: { type: string }
+        validationStatus: { $ref: '#/components/schemas/ValidationStatus' }
+        validatedBy: { $ref: '#/components/schemas/NullableString' }
+        validatedAt: { type: [string, 'null'], format: date-time }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        revisionNote: { $ref: '#/components/schemas/NullableString' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        derived: { type: boolean, description: Inferred from imported history (read-only) }
+    PlacementChangeRequest:
+      type: object
+      required: [id, employeeId, movementType, effectiveDate, previousAreaId, newAreaId, previousProjectId, newProjectId, previousPosition, newPosition, notes, createdBy, validationStatus, validatedBy, validatedAt, submittedAt, revisionNote, baseVersion, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        employeeId: { type: string }
+        movementType: { type: string, enum: [PROMOTION, MUTATION, AREA_CHANGE, PROJECT_CHANGE, POSITION_CHANGE] }
+        effectiveDate: { type: string, format: date }
+        previousAreaId: { $ref: '#/components/schemas/NullableString' }
+        newAreaId: { $ref: '#/components/schemas/NullableString' }
+        previousProjectId: { $ref: '#/components/schemas/NullableString' }
+        newProjectId: { $ref: '#/components/schemas/NullableString' }
+        previousPosition: { $ref: '#/components/schemas/NullableString' }
+        newPosition: { $ref: '#/components/schemas/NullableString' }
+        notes: { type: string }
+        createdBy: { type: string }
+        validationStatus: { $ref: '#/components/schemas/ValidationStatus' }
+        validatedBy: { $ref: '#/components/schemas/NullableString' }
+        validatedAt: { type: [string, 'null'], format: date-time }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        revisionNote: { $ref: '#/components/schemas/NullableString' }
+        baseVersion: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ReplacementNeed:
+      type: object
+      required: [id, employeeExitId, originalEmployeeId, areaId, projectId, position, exitDate, replacementEmployeeId, replacementJoinDate, previousReplacementNeedId, status, lifecycleStatus, slaStatus, fulfilledAt, gapWorkingDays, version, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        employeeExitId: { type: string }
+        originalEmployeeId: { type: string }
+        areaId: { $ref: '#/components/schemas/NullableString' }
+        projectId: { $ref: '#/components/schemas/NullableString' }
+        position: { $ref: '#/components/schemas/NullableString' }
+        exitDate: { type: string, format: date }
+        replacementEmployeeId: { $ref: '#/components/schemas/NullableString' }
+        replacementJoinDate: { $ref: '#/components/schemas/NullableString' }
+        previousReplacementNeedId: { $ref: '#/components/schemas/NullableString' }
+        status: { type: string, enum: [OPEN, MATCHED, FULFILLED, OVER_TARGET], description: Legacy combined label }
+        lifecycleStatus: { type: string, enum: [OPEN, MATCHED, FULFILLED] }
+        slaStatus: { type: [string, 'null'], enum: [WITHIN_TARGET, OVER_TARGET, null] }
+        fulfilledAt: { type: [string, 'null'], format: date-time }
+        gapWorkingDays: { type: [integer, 'null'] }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        derived: { type: boolean }
+    CareerEvent:
+      type: object
+      required: [id, employeeId, movementType, effectiveDate, previousAreaId, newAreaId, previousProjectId, newProjectId, previousPosition, newPosition, notes, createdBy, createdAt]
+      properties:
+        id: { type: string }
+        employeeId: { type: string }
+        movementType: { type: string, enum: [JOIN, PROMOTION, MUTATION, AREA_CHANGE, PROJECT_CHANGE, POSITION_CHANGE, REPLACEMENT, EXIT, REENTRY, OTHER] }
+        effectiveDate: { type: string, format: date }
+        previousAreaId: { $ref: '#/components/schemas/NullableString' }
+        newAreaId: { $ref: '#/components/schemas/NullableString' }
+        previousProjectId: { $ref: '#/components/schemas/NullableString' }
+        newProjectId: { $ref: '#/components/schemas/NullableString' }
+        previousPosition: { $ref: '#/components/schemas/NullableString' }
+        newPosition: { $ref: '#/components/schemas/NullableString' }
+        notes: { type: string }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        derived: { type: boolean }
+    ActivityEvent:
+      type: object
+      required: [id, employeeId, type, title, description, date]
+      properties:
+        id: { type: string }
+        employeeId: { type: string }
+        type: { type: string, enum: [ENTRY, EXIT, VALIDATION, MATCHING, FULFILLMENT] }
+        title: { type: string }
+        description: { type: string }
+        date: { type: string, format: date-time }
+    EmployeeNote: { type: object, required: [id, employeeId, notes, createdBy, createdAt], properties: { id: { type: string }, employeeId: { type: string }, notes: { type: string }, createdBy: { type: string }, createdAt: { type: string, format: date-time } } }
+    EmployeeFlag:
+      type: object
+      required: [id, employeeId, status, reason, notes, createdBy, createdAt]
+      properties: { id: { type: string }, employeeId: { type: string }, status: { type: string, enum: [NORMAL, REVIEW_REQUIRED, FLAGGED] }, reason: { type: string }, notes: { type: string }, createdBy: { type: string }, createdAt: { type: string, format: date-time } }
+    Snapshot:
+      type: object
+      required: [employees, employeeExits, replacementNeeds, employeeMovements, movementRequests, movements, employeeNotes, employeeFlags]
+      properties:
+        employees: { type: array, items: { $ref: '#/components/schemas/Employee' } }
+        employeeExits: { type: array, items: { $ref: '#/components/schemas/EmployeeExit' } }
+        replacementNeeds: { type: array, items: { $ref: '#/components/schemas/ReplacementNeed' } }
+        employeeMovements: { type: array, items: { $ref: '#/components/schemas/CareerEvent' } }
+        movementRequests: { type: array, items: { $ref: '#/components/schemas/PlacementChangeRequest' } }
+        movements: { type: array, items: { $ref: '#/components/schemas/ActivityEvent' } }
+        employeeNotes: { type: array, items: { $ref: '#/components/schemas/EmployeeNote' } }
+        employeeFlags: { type: array, items: { $ref: '#/components/schemas/EmployeeFlag' } }
+    EmployeeDetail:
+      type: object
+      required: [employee, timeline, activity, exits, notes, flags, pendingReview]
+      properties:
+        employee: { $ref: '#/components/schemas/Employee' }
+        timeline: { type: array, items: { $ref: '#/components/schemas/CareerEvent' } }
+        activity: { type: array, items: { $ref: '#/components/schemas/ActivityEvent' } }
+        exits: { type: array, items: { $ref: '#/components/schemas/EmployeeExit' } }
+        notes: { type: array, items: { $ref: '#/components/schemas/EmployeeNote' } }
+        flags: { type: array, items: { $ref: '#/components/schemas/EmployeeFlag' } }
+        pendingReview: { type: array, items: { $ref: '#/components/schemas/ReviewItem' } }
+    Candidate:
+      type: object
+      required: [employee, eligible, reasons, fulfillmentBlockers]
+      properties:
+        employee: { $ref: '#/components/schemas/Employee' }
+        eligible: { type: boolean }
+        reasons: { type: array, items: { type: string } }
+        fulfillmentBlockers: { type: array, items: { type: string } }
+    NeedDetail:
+      type: object
+      required: [need, chain, candidates]
+      properties:
+        need: { $ref: '#/components/schemas/ReplacementNeed' }
+        chain: { type: array, items: { $ref: '#/components/schemas/ReplacementNeed' } }
+        candidates: { type: array, items: { $ref: '#/components/schemas/Candidate' } }
+    DashboardKPI:
+      type: object
+      required: [filters, activeEmployees, employees, validatedExits, replacementNeeds, fulfilled, open, overSla, fulfillmentRate, averageGap, movements, contractReminders, pendingValidations, businessDate]
+      properties:
+        filters: { type: object, additionalProperties: { type: string } }
+        activeEmployees: { type: integer }
+        employees: { type: integer }
+        validatedExits: { type: integer }
+        replacementNeeds: { type: integer }
+        fulfilled: { type: integer }
+        open: { type: integer }
+        overSla: { type: integer }
+        fulfillmentRate: { type: integer }
+        averageGap: { type: number }
+        movements: { type: integer }
+        contractReminders: { type: object, additionalProperties: { type: integer } }
+        pendingValidations: { type: integer }
+        businessDate: { type: string, format: date }
+    ContractSettings:
+      type: object
+      required: [scope, reminderDays, updatedBy, updatedAt]
+      properties:
+        scope: { type: string, enum: [GLOBAL] }
+        reminderDays: { type: array, items: { type: integer }, description: Days before the contract end date, descending. }
+        updatedBy: { $ref: '#/components/schemas/NullableString' }
+        updatedAt: { type: [string, 'null'], format: date-time }
+    ContractState:
+      type: object
+      required: [status, incompleteReason, daysRemaining, reminderThreshold, contractDurationDays, tenureDays]
+      properties:
+        status: { type: string, enum: [EXPIRING, EXPIRED, INCOMPLETE, OK] }
+        incompleteReason: { $ref: '#/components/schemas/NullableString' }
+        daysRemaining: { type: [integer, 'null'] }
+        reminderThreshold: { type: [integer, 'null'] }
+        contractDurationDays: { type: [integer, 'null'], description: Contract end − start (not tenure). }
+        tenureDays: { type: [integer, 'null'], description: Business date − join date (not contract duration). }
+    ContractItem:
+      type: object
+      required: [employeeId, personnelId, name, areaId, projectId, position, joinDate, contractStartDate, contractEndDate, contractStatus, state]
+      properties:
+        employeeId: { type: string }
+        personnelId: { type: string }
+        name: { type: string }
+        areaId: { $ref: '#/components/schemas/NullableString' }
+        projectId: { $ref: '#/components/schemas/NullableString' }
+        position: { $ref: '#/components/schemas/NullableString' }
+        joinDate: { $ref: '#/components/schemas/NullableString' }
+        contractStartDate: { $ref: '#/components/schemas/NullableString' }
+        contractEndDate: { $ref: '#/components/schemas/NullableString' }
+        contractStatus: { $ref: '#/components/schemas/ContractStatus' }
+        state: { $ref: '#/components/schemas/ContractState' }
+    ContractSummary:
+      type: object
+      description: Counts of personnel (one current contract each).
+      required: [monitored, expiring, expired, incomplete]
+      properties:
+        monitored: { type: integer }
+        expiring: { type: integer }
+        expired: { type: integer }
+        incomplete: { type: integer }
+    ContractMonitoring:
+      type: object
+      required: [businessDate, settings, summary, filters, items, total, page, pageSize]
+      properties:
+        businessDate: { type: string, format: date }
+        settings: { $ref: '#/components/schemas/ContractSettings' }
+        summary: { $ref: '#/components/schemas/ContractSummary' }
+        filters: { type: object, additionalProperties: true }
+        items: { type: array, items: { $ref: '#/components/schemas/ContractItem' } }
+        total: { type: integer }
+        page: { type: integer }
+        pageSize: { type: integer }
+    DocumentSubjectType: { type: string, enum: [PERSONNEL_ENTRY, CHANGE_REQUEST, PERSONNEL], description: 'PERSONNEL = employee documents (Dokumen karyawan): never locked, requirements only warn' }
+    DocumentTransactionType: { type: string, enum: [EMPLOYEE_ENTRY, EMPLOYEE_BASIC_EDIT, EMPLOYEE_PLACEMENT_CHANGE, EMPLOYEE_EXIT, EMPLOYEE_FILE], description: 'Transaction types plus EMPLOYEE_FILE (employee documents; warning only, no validation gate)' }
+    EmployeeDocumentSummary:
+      type: object
+      required: [monitored, incomplete, missing, pending, rejected]
+      properties:
+        monitored: { type: integer, description: Active employees in scope }
+        incomplete: { type: integer, description: Employees with any gap }
+        missing: { type: integer, description: Employees with the document not uploaded }
+        pending: { type: integer, description: Employees with the document waiting for review }
+        rejected: { type: integer, description: Employees with the document rejected }
+    EmployeeDocumentStatus:
+      type: object
+      required: [required, monitored, incomplete, missing, pending, rejected, items]
+      properties:
+        required: { type: array, items: { $ref: '#/components/schemas/DocumentType' }, description: 'Required employee documents (fixed: PKWT, migration 0004)' }
+        monitored: { type: integer, description: Active employees in scope }
+        incomplete: { type: integer }
+        missing: { type: integer }
+        pending: { type: integer }
+        rejected: { type: integer }
+        items: { type: array, description: Only employees with a gap, items: { type: object, required: [employeeId, missing, pending, rejected], properties: { employeeId: { type: string }, missing: { type: array, items: { type: string } }, pending: { type: array, items: { type: string } }, rejected: { type: array, items: { type: string } } } } }
+    DocumentReviewStatus: { type: string, enum: [PENDING_REVIEW, ACCEPTED, REJECTED] }
+    DocumentType:
+      type: object
+      required: [code, name, description, active]
+      properties:
+        code: { type: string }
+        name: { type: string }
+        description: { $ref: '#/components/schemas/NullableString' }
+        active: { type: boolean }
+    DocumentTypeInput:
+      type: object
+      required: [name, active]
+      properties:
+        name: { type: string }
+        description: { $ref: '#/components/schemas/NullableString' }
+        active: { type: boolean }
+    DocumentCatalog:
+      type: object
+      required: [types, requirements, maxBytes, allowedTypes]
+      properties:
+        types: { type: array, items: { $ref: '#/components/schemas/DocumentType' } }
+        requirements: { type: object, description: Transaction type → required document type codes., additionalProperties: { type: array, items: { type: string } } }
+        maxBytes: { type: integer }
+        allowedTypes: { type: array, items: { type: string } }
+    DocumentVersion:
+      type: object
+      required: [id, documentTypeCode, version, originalName, contentType, sizeBytes, uploadedBy, uploadedAt, reviewStatus, reviewNote, reviewedBy, reviewedAt, supersededAt]
+      properties:
+        id: { type: string }
+        documentTypeCode: { type: string }
+        version: { type: integer }
+        originalName: { type: string }
+        contentType: { type: string }
+        sizeBytes: { type: integer }
+        uploadedBy: { type: string }
+        uploadedAt: { type: string, format: date-time }
+        reviewStatus: { $ref: '#/components/schemas/DocumentReviewStatus' }
+        reviewNote: { $ref: '#/components/schemas/NullableString' }
+        reviewedBy: { $ref: '#/components/schemas/NullableString' }
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        supersededAt: { type: [string, 'null'], format: date-time }
+    DocumentSlot:
+      type: object
+      required: [documentTypeCode, name, required, status, current, history]
+      properties:
+        documentTypeCode: { type: string }
+        name: { type: string }
+        required: { type: boolean }
+        status: { type: string, enum: [MISSING, PENDING_REVIEW, ACCEPTED, REJECTED] }
+        current: { oneOf: [{ $ref: '#/components/schemas/DocumentVersion' }, { type: 'null' }] }
+        history: { type: array, items: { $ref: '#/components/schemas/DocumentVersion' } }
+    SubjectDocuments:
+      type: object
+      required: [subjectType, subjectId, transactionType, subjectStatus, locked, complete, blockers, slots]
+      properties:
+        subjectType: { $ref: '#/components/schemas/DocumentSubjectType' }
+        subjectId: { type: string }
+        transactionType: { $ref: '#/components/schemas/DocumentTransactionType' }
+        subjectStatus: { $ref: '#/components/schemas/ValidationStatus' }
+        locked: { type: boolean }
+        complete: { type: boolean }
+        blockers: { type: object, additionalProperties: { type: string } }
+        slots: { type: array, items: { $ref: '#/components/schemas/DocumentSlot' } }
+    DocumentReview:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ACCEPTED, REJECTED] }
+        note: { type: string, description: Required when REJECTED; shown to the submitter. }
+    DocumentQueueItem:
+      type: object
+      required: [subjectType, subjectId, transactionType, subjectStatus, employeeId, personnelId, name, areaId, submittedAt, requiredTotal, requiredAccepted, missing, pendingReview, rejected, complete]
+      properties:
+        subjectType: { $ref: '#/components/schemas/DocumentSubjectType' }
+        subjectId: { type: string }
+        transactionType: { $ref: '#/components/schemas/TransactionType' }
+        subjectStatus: { $ref: '#/components/schemas/ValidationStatus' }
+        employeeId: { type: string }
+        personnelId: { type: string }
+        name: { type: string }
+        areaId: { $ref: '#/components/schemas/NullableString' }
+        submittedAt: { type: [string, 'null'], format: date-time }
+        requiredTotal: { type: integer }
+        requiredAccepted: { type: integer }
+        missing: { type: integer }
+        pendingReview: { type: integer }
+        rejected: { type: integer }
+        complete: { type: boolean }
+    DocumentSummary:
+      type: object
+      required: [incompleteSubmissions, pendingReviewDocuments, rejectedDocuments]
+      properties:
+        incompleteSubmissions: { type: integer, description: Submissions (SUBMITTED/REVISION_REQUIRED) whose required documents are not all accepted. }
+        pendingReviewDocuments: { type: integer, description: Current document versions awaiting review on open submissions. }
+        rejectedDocuments: { type: integer, description: Current document versions rejected on open submissions. }
+    ReadinessIssueCode: { type: string, enum: [PLACEMENT_INCOMPLETE, IMPORT_REVIEW, DOCUMENTS_INCOMPLETE, IMPORT_WARNING, CONTRACT_CHECK] }
+    ReadinessIssue:
+      type: object
+      required: [code, blocking, message]
+      properties:
+        code: { $ref: '#/components/schemas/ReadinessIssueCode' }
+        blocking: { type: boolean, description: true when bulk/final validation excludes or rejects the entry }
+        message: { type: string }
+        rowNumber: { type: integer, description: Excel row (import warnings) }
+        column: { type: string, description: Excel column (import warnings) }
+        rawValue: { type: string }
+    ValidationReadiness:
+      type: object
+      required: [businessDate, total, ready, needsCheck, blocked, issues, warningColumns, items]
+      properties:
+        businessDate: { type: string, format: date }
+        total: { type: integer }
+        ready: { type: integer, description: Entries without any issue }
+        needsCheck: { type: integer, description: Entries with informational issues only }
+        blocked: { type: integer, description: Entries with at least one blocking issue }
+        issues: { type: array, items: { type: object, required: [code, blocking, count], properties: { code: { $ref: '#/components/schemas/ReadinessIssueCode' }, blocking: { type: boolean }, count: { type: integer, description: personnel } } } }
+        warningColumns: { type: array, items: { type: object, required: [column, count], properties: { column: { type: string }, count: { type: integer, description: personnel } } } }
+        items: { type: array, description: Only entries with at least one issue (max 20 issues each), items: { type: object, required: [employeeId, issues], properties: { employeeId: { type: string }, issues: { type: array, items: { $ref: '#/components/schemas/ReadinessIssue' } } } } }
+    DocumentQueue:
+      type: object
+      required: [status, summary, items]
+      properties:
+        status: { type: string }
+        summary: { $ref: '#/components/schemas/DocumentSummary' }
+        items: { type: array, items: { $ref: '#/components/schemas/DocumentQueueItem' } }
+    ComplianceSummary:
+      type: object
+      required: [businessDate, areaId, contracts, documents, employeeDocuments]
+      properties:
+        businessDate: { type: string, format: date }
+        areaId: { type: string }
+        contracts:
+          oneOf:
+            - type: 'null'
+            - type: object
+              required: [reminderDays, summary]
+              properties:
+                reminderDays: { type: array, items: { type: integer } }
+                summary: { $ref: '#/components/schemas/ContractSummary' }
+        documents: { oneOf: [{ $ref: '#/components/schemas/DocumentSummary' }, { type: 'null' }] }
+        employeeDocuments: { oneOf: [{ $ref: '#/components/schemas/EmployeeDocumentSummary' }, { type: 'null' }], description: Employees without an accepted PKWT (warning only) }
+    FieldIssue:
+      type: object
+      required: [rowNumber, column, reason, severity]
+      properties: { rowNumber: { type: integer }, column: { type: string }, field: { type: string }, reason: { type: string }, rawValue: { type: string }, severity: { type: string, enum: [WARNING, ERROR] } }
+    ImportSummary:
+      type: object
+      required: [fileName, sheetName, nonEmptyRows, uniqueIdentities, newMasters, newSourceRecords, identicalDuplicates, movementCandidates, exitReentryCandidates, ambiguousCases, identityConflicts, confirmedEvents, warningRows, exceptionRows, outOfScopeRows, blankRowsSkipped, pendingReviewItems]
+      properties:
+        fileName: { type: string }
+        sheetName: { type: string }
+        nonEmptyRows: { type: integer }
+        uniqueIdentities: { type: integer }
+        newMasters: { type: integer }
+        newSourceRecords: { type: integer }
+        identicalDuplicates: { type: integer }
+        movementCandidates: { type: integer }
+        exitReentryCandidates: { type: integer }
+        ambiguousCases: { type: integer }
+        identityConflicts: { type: integer }
+        confirmedEvents: { type: integer }
+        warningRows: { type: integer }
+        exceptionRows: { type: integer }
+        outOfScopeRows: { type: integer }
+        blankRowsSkipped: { type: integer }
+        pendingReviewItems: { type: integer }
+    ImportStatus: { type: string, enum: [COMPLETED, COMPLETED_WITH_REVIEW, COMPLETED_WITH_WARNINGS, COMPLETED_WITH_EXCEPTIONS, FAILED] }
+    ImportException:
+      type: object
+      required: [id, rowNumber, reason, rawValues]
+      properties: { id: { type: string }, rowNumber: { type: integer }, reason: { type: string }, rawValues: { type: object, additionalProperties: { type: string } } }
+    ExcludedRow:
+      type: object
+      required: [rowNumber, personnelId, name, areaName, message]
+      properties: { rowNumber: { type: integer }, personnelId: { type: string }, name: { type: string }, areaName: { type: string }, message: { type: string } }
+    ImportPreview:
+      type: object
+      required: [previewId, expiresAt, summary, status, scopePreview, discoveredAreas, discoveredProjects, warnings, warningsTotal, exceptions, reviewItems]
+      properties:
+        previewId: { type: string, description: Opaque staging token bound to the caller }
+        expiresAt: { type: string, format: date-time }
+        summary: { $ref: '#/components/schemas/ImportSummary' }
+        status: { $ref: '#/components/schemas/ImportStatus' }
+        scopePreview:
+          type: object
+          required: [validInScopeRows, warningReviewRows, errorRows, outOfScopeRows, excludedRows]
+          properties:
+            validInScopeRows: { type: integer }
+            warningReviewRows: { type: integer }
+            errorRows: { type: integer }
+            outOfScopeRows: { type: integer }
+            excludedRows: { type: array, items: { $ref: '#/components/schemas/ExcludedRow' } }
+        discoveredAreas: { type: array, items: { $ref: '#/components/schemas/Area' } }
+        discoveredProjects: { type: array, items: { type: object, required: [id, name, clientName, areaId], properties: { id: { type: string }, name: { type: string }, clientName: { type: string }, areaId: { type: string }, subArea: { $ref: '#/components/schemas/NullableString' } } } }
+        warnings: { type: array, description: In-scope row warnings (row + column) shown before commit; capped at 5000, items: { $ref: '#/components/schemas/FieldIssue' } }
+        warningsTotal: { type: integer, description: Total warnings in the plan; greater than warnings.length when the list is capped }
+        exceptions: { type: array, items: { $ref: '#/components/schemas/ImportException' } }
+        reviewItems:
+          type: array
+          items:
+            type: object
+            required: [id, kind, personnelId, personnelName, reason, rowNumbers, aspects]
+            properties: { id: { type: string }, kind: { type: string }, personnelId: { type: string }, personnelName: { type: string }, reason: { type: string }, rowNumbers: { type: array, items: { type: integer } }, aspects: { type: array, items: { type: string } } }
+    PreviewRef: { type: object, required: [previewId], properties: { previewId: { type: string } } }
+    ImportCommit:
+      type: object
+      required: [batchId, status, summary, replay]
+      properties: { batchId: { type: string }, status: { $ref: '#/components/schemas/ImportStatus' }, summary: { $ref: '#/components/schemas/ImportSummary' }, replay: { type: boolean } }
+    ImportBatch:
+      type: object
+      required: [id, fileName, sheetName, status, summary, createdBy, createdAt]
+      properties: { id: { type: string }, fileName: { type: string }, sheetName: { type: string }, status: { $ref: '#/components/schemas/ImportStatus' }, summary: { $ref: '#/components/schemas/ImportSummary' }, createdBy: { type: string }, createdAt: { type: string, format: date-time } }
+    SourceRecord:
+      type: object
+      required: [id, businessKey, personnelId, name, batchId, fileName, sheetName, rowNumber, fields, fingerprint, warnings, reconciliationStatus, createdAt]
+      properties:
+        id: { type: string }
+        businessKey: { type: string }
+        personnelId: { type: string }
+        name: { type: string }
+        batchId: { type: string }
+        fileName: { type: string }
+        sheetName: { type: string }
+        rowNumber: { type: integer, description: Provenance only, never chronology }
+        fields: { type: object, additionalProperties: { type: [string, 'null'] } }
+        fingerprint: { type: string }
+        warnings: { type: array, items: { $ref: '#/components/schemas/FieldIssue' } }
+        reconciliationStatus: { type: string, enum: [IDENTICAL, LINKED, PENDING_REVIEW, CONFIRMED] }
+        createdAt: { type: string, format: date-time }
+    ReviewItem:
+      type: object
+      required: [id, businessKey, personnelId, personnelName, kind, aspects, areaId, recordIds, diffFields, dates, rowNumbers, reason, status, decisionVersion, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        businessKey: { type: string }
+        personnelId: { type: string }
+        personnelName: { type: string }
+        kind: { type: string, enum: [IDENTICAL_DUPLICATE, PROFILE_VARIATION, PLACEMENT_CHANGE, EXIT, REENTRY, IDENTITY_CONFLICT, UNDETERMINED] }
+        aspects: { type: array, items: { type: string } }
+        areaId: { $ref: '#/components/schemas/NullableString' }
+        recordIds: { type: array, items: { type: string } }
+        currentMasterFields: { type: [object, 'null'], additionalProperties: { type: [string, 'null'] } }
+        diffFields: { type: array, items: { type: string } }
+        dates: { type: array, items: { type: object, properties: { label: { type: string }, value: { $ref: '#/components/schemas/NullableString' } } } }
+        rowNumbers: { type: array, items: { type: integer } }
+        reason: { type: string }
+        candidate: { type: [object, 'null'], properties: { label: { type: string }, movementType: { type: string }, note: { type: string } } }
+        status: { type: string, enum: [PENDING, CONFIRMED, DISMISSED, KEPT_PENDING] }
+        resolution: { type: [object, 'null'], additionalProperties: true }
+        decisionVersion: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    ImportOverview:
+      type: object
+      required: [batches, reviewItems, sourceRecords]
+      properties:
+        batches: { type: array, items: { $ref: '#/components/schemas/ImportBatch' } }
+        reviewItems: { type: array, items: { $ref: '#/components/schemas/ReviewItem' } }
+        sourceRecords: { type: array, items: { $ref: '#/components/schemas/SourceRecord' } }
+    ReviewDecision:
+      type: object
+      required: [decisionKind]
+      properties:
+        decisionKind: { type: string, enum: [IDENTICAL_DUPLICATE, PROFILE_VARIATION, PLACEMENT_CHANGE, EXIT, REENTRY, IDENTITY_CONFLICT, UNDETERMINED] }
+        movementType: { type: string }
+        effectiveDate: { $ref: '#/components/schemas/NullableString' }
+        exitScope: { type: string, enum: [PLACEMENT_END, EMPLOYMENT_END] }
+        beforeRecordId: { $ref: '#/components/schemas/NullableString' }
+        afterRecordId: { $ref: '#/components/schemas/NullableString' }
+        note: { type: string }
+        keepPending: { type: boolean }
+        expectedDecisionVersion: { type: integer }
+    Notification:
+      type: object
+      required: [id, dedupeKey, recipientUserId, category, severity, title, message, actorUserId, entityType, entityId, areaId, target, requiresAction, createdAt, readAt, archivedAt, resolvedAt]
+      properties:
+        id: { type: string }
+        dedupeKey: { type: string }
+        recipientUserId: { type: string }
+        category: { type: string, enum: [VALIDATION_REQUEST, VALIDATION_RESULT, EXIT, MOVEMENT, REPLACEMENT, IMPORT, CONTRACT, SLA, PERSONNEL, ADMIN] }
+        severity: { type: string, enum: [info, success, warning, error] }
+        title: { type: string }
+        message: { type: string }
+        actorUserId: { $ref: '#/components/schemas/NullableString' }
+        entityType: { type: string }
+        entityId: { $ref: '#/components/schemas/NullableString' }
+        areaId: { $ref: '#/components/schemas/NullableString' }
+        target: { type: [object, 'null'], properties: { kind: { type: string, enum: [validation, employee, replacement, import, route] }, id: { type: string }, route: { type: string } } }
+        requiresAction: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        readAt: { type: [string, 'null'], format: date-time }
+        archivedAt: { type: [string, 'null'], format: date-time }
+        resolvedAt: { type: [string, 'null'], format: date-time }
+    UserAdmin:
+      type: object
+      required: [id, name, email, role, areaId, active, createdAt]
+      properties: { id: { type: string }, name: { type: string }, email: { type: string }, role: { $ref: '#/components/schemas/Role' }, areaId: { $ref: '#/components/schemas/NullableString' }, active: { type: boolean }, createdAt: { type: string, format: date-time } }
+    UserInput:
+      type: object
+      properties: { name: { type: string }, email: { type: string }, role: { $ref: '#/components/schemas/Role' }, areaId: { $ref: '#/components/schemas/NullableString' }, active: { type: boolean }, password: { type: string, minLength: 12 } }

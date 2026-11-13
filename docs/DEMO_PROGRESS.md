@@ -42,3 +42,6 @@
 - IndexedDB migrated v1 → v2 (adds `sourceRecords` + `reviewItems`, old data kept).
 - Modules: `src/lib/import/{fingerprint,classify,reconcile,derivedEvents}.ts`,
   component `ImportReviewQueue`. 170 tests incl. the 20 mandatory scenarios.
+## 2026-11-10 — Full-stack (Go/Fiber + PostgreSQL)
+
+Frontend dipindah ke `apps/web` dan kini memakai backend `apps/api` secara default (`VITE_DATA_SOURCE=api`). Prototype browser-only tetap tersedia lewat `VITE_DATA_SOURCE=local`. Progres, matriks fitur, asumsi/TBC, dan batasan: [BACKEND_PROGRESS.md](BACKEND_PROGRESS.md).

@@ -1,0 +1,113 @@
+name: CI
+
+# One always-triggered workflow. Component jobs are skipped when their paths did not
+# change; skipped jobs count as passing for required checks. Configure ONLY the
+# `ci-ok` job as the required status check (see docs/BACKEND_PROGRESS.md §CI).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      web: ${{ steps.detect.outputs.web }}
+      api: ${{ steps.detect.outputs.api }}
+      contracts: ${{ steps.detect.outputs.contracts }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: detect
+        run: scripts/ci-changes.sh "${{ github.event.pull_request.base.sha || github.event.before }}" "${{ github.sha }}"
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: apps/web/dist
+          retention-days: 7
+
+  contracts:
+    needs: changes
+    if: needs.changes.outputs.contracts == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Generated TypeScript types match openapi.yaml
+        run: npm run contracts:check
+
+  api:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: gelatik_hr_test
+          POSTGRES_USER: gelatik
+          POSTGRES_PASSWORD: ci-only
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U gelatik -d gelatik_hr_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      TEST_DATABASE_URL: postgres://gelatik:ci-only@localhost:5432/gelatik_hr_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go vet ./...
+      - name: Unit + PostgreSQL integration tests (includes OpenAPI route drift check)
+        run: go test -count=1 ./...
+      - name: Migrations apply to an empty database
+        run: |
+          psql "postgresql://gelatik:ci-only@localhost:5432/postgres" -c "CREATE DATABASE migrate_check"
+          DATABASE_URL="postgres://gelatik:ci-only@localhost:5432/migrate_check?sslmode=disable" go run ./cmd/api migrate
+          DATABASE_URL="postgres://gelatik:ci-only@localhost:5432/migrate_check?sslmode=disable" go run ./cmd/api migrate status
+      - run: go build -trimpath -o bin/api ./cmd/api
+      - name: Container image builds
+        run: docker build -t gelatik-hr-api:ci .
+
+  ci-ok:
+    # Aggregate gate: fails if any component job failed or was cancelled; passes when they were skipped.
+    if: always()
+    needs: [changes, web, contracts, api]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '${{ toJSON(needs) }}' | grep -Eq '"result": "(failure|cancelled)"' && { echo "A required component job failed."; exit 1; } || echo "All required checks passed or were not needed."

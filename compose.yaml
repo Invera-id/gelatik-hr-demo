@@ -1,0 +1,43 @@
+# Local development services. Run: docker compose up -d db
+# The api service is optional (profile "api"); most developers run `make api` on the host.
+name: gelatik-hr
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: gelatik_hr
+      POSTGRES_USER: gelatik
+      POSTGRES_PASSWORD: gelatik-dev-only
+    ports:
+      - "${GELATIK_DB_PORT:-55432}:5432"
+    volumes:
+      - gelatik-db-data:/var/lib/postgresql/data
+      - ./apps/api/scripts/create-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gelatik -d gelatik_hr"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    profiles: ["api"]
+    build:
+      context: ./apps/api
+    environment:
+      APP_ENV: development
+      DATABASE_URL: postgres://gelatik:gelatik-dev-only@db:5432/gelatik_hr?sslmode=disable
+      ALLOWED_ORIGINS: http://localhost:5173
+      SESSION_COOKIE_SECURE: "false"
+      STORAGE_DIR: /data/documents
+    volumes:
+      - gelatik-documents:/data/documents
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  gelatik-db-data:
+  gelatik-documents:

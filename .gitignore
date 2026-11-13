@@ -22,3 +22,33 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Environment files (examples are committed, real values are not)
+.env
+.env.*
+# Encrypted env files are committed; the tools holding the key are not (env-tools/)
+!**/.env.enc
+
+# Go
+apps/api/bin/
+*.test
+coverage.out
+
+# Never commit personnel workbooks
+*.xlsx
+*.xls
+
+# Private document storage (development default STORAGE_DIR=./var/documents)
+apps/api/var/
+
+# Encryption/decryption scripts contain the key: share privately, never commit
+env-tools/
+decrypt-env.mjs
+encrypt-env.mjs
+
+# Local tool state (never shared)
+.claude/settings.local.json
+.remember/
+
+# Data exports / reports that may contain personnel data
+*.csv

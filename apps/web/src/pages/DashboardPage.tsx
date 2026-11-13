@@ -1,0 +1,93 @@
+import { Activity, CalendarClock, CheckCircle2, Clock3, Gauge, UserMinus, Users, X } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import { PageHeader } from '../components/PageHeader'
+import { StatusBadge } from '../components/StatusBadge'
+import { replacementTone } from '../components/statusTones'
+import { allowedAreaIds } from '../config/access'
+import { useDemo } from '../context/DemoContext'
+import { demoUsers, positions } from '../data/demoData'
+import { formatDate, replacementLabels } from '../lib/businessRules'
+import { selectDashboardData, type DashboardFilters } from '../lib/dashboardRules'
+import type { ReplacementNeed } from '../types'
+import { DEMO_TODAY, getContractReminders, type ContractReminderCategory } from '../lib/contractRules'
+import { terminology as term } from '../config/terminology'
+import { EmptyState } from '../components/EmptyState'
+import { ComplianceSection } from '../components/ComplianceSection'
+import { dataSource } from '../config/dataSource'
+
+const TOP_PROJECTS = 10
+
+type DrillKey = 'ACTIVE' | 'EXITS' | 'FULFILLED' | 'OPEN' | 'OVER_SLA' | 'CONTRACT' | null
+
+export function DashboardPage() {
+  const { currentUser, areas, employees, employeeExits, replacementNeeds, employeeMovements, permissionConfig, projects, importStorageReady, dataMode, businessDate } = useDemo()
+  const user = currentUser ?? demoUsers[0]
+  const allowedAreas = allowedAreaIds(user, permissionConfig)
+  const lockedArea = allowedAreas?.length === 1 ? allowedAreas[0] : ''
+  const [filters, setFilters] = useState<DashboardFilters>({ dateFrom: '2000-01-01', dateTo: '2099-12-31', areaId: lockedArea, projectId: '', position: '', status: '' })
+  const [drill, setDrill] = useState<DrillKey>(null)
+  const allowedEmployees = useMemo(() => employees.filter((employee) => allowedAreas === null || Boolean(employee.areaId && allowedAreas.includes(employee.areaId))), [allowedAreas, employees])
+  const data = useMemo(() => selectDashboardData(allowedEmployees, employeeExits, replacementNeeds.filter((need) => allowedAreas === null || Boolean(need.areaId && allowedAreas.includes(need.areaId))), employeeMovements, filters), [allowedAreas, allowedEmployees, employeeExits, employeeMovements, filters, replacementNeeds])
+  const referenceDate = dataMode === 'SAMPLE' ? DEMO_TODAY : businessDate
+  const contractReminders = useMemo(() => getContractReminders(data.employees, referenceDate), [data.employees, referenceDate])
+  const update = (key: keyof DashboardFilters, value: string) => setFilters((current) => ({ ...current, [key]: value, ...(key === 'areaId' ? { projectId: '' } : {}) }))
+  const kpis: Array<{ key: DrillKey; label: string; value: string | number; note: string; tone: string; icon: typeof Users }> = [
+    { key: 'ACTIVE', label: 'Active Employee', value: data.activeEmployees.length, note: 'Aktif dan tervalidasi', tone: 'positive', icon: Users },
+    { key: 'EXITS', label: term.turnover, value: data.exits.length, note: 'Exit tervalidasi', tone: 'neutral', icon: UserMinus },
+    { key: 'FULFILLED', label: 'Fulfilled', value: data.fulfilled.length, note: `${data.fulfillmentRate}% completion rate`, tone: 'positive', icon: CheckCircle2 },
+    { key: 'OPEN', label: term.vacant, value: data.open.length, note: 'Belum terpenuhi', tone: 'warning', icon: Clock3 },
+    { key: 'OVER_SLA', label: term.overSla, value: data.overSla.length, note: 'Lebih dari 3 hari kerja', tone: 'danger', icon: Gauge },
+    { key: null, label: 'Fulfillment Rate', value: `${data.fulfillmentRate}%`, note: 'Completed / all needs', tone: 'positive', icon: Gauge },
+    { key: null, label: 'Average Gap', value: `${data.averageGap.toFixed(1)} hari`, note: 'Working-day gap', tone: 'neutral', icon: Activity },
+    ...(dataSource === 'local' ? [{ key: 'CONTRACT' as DrillKey, label: 'Contract Expiring Soon', value: contractReminders.length, note: `Per ${formatDate(referenceDate)}`, tone: 'warning', icon: CalendarClock }] : []),
+  ]
+  const chartAreas = useMemo(() => areas.filter((area) => allowedAreas === null || allowedAreas.includes(area.id)), [areas, allowedAreas])
+  // Counted in one pass per collection (imports bring hundreds of projects and thousands of
+  // employees; nested find/filter per bar froze the page). Project charts show the top
+  // TOP_PROJECTS with a value: hundreds of bars are unreadable and slow to lay out.
+  const charts = useMemo(() => {
+    const employeeById = new Map(employees.map((employee) => [employee.id, employee]))
+    const exitsByArea = new Map<string, number>(), exitsByProject = new Map<string, number>()
+    for (const exit of data.exits) {
+      const employee = employeeById.get(exit.employeeId)
+      if (employee?.areaId) exitsByArea.set(employee.areaId, (exitsByArea.get(employee.areaId) ?? 0) + 1)
+      if (employee?.projectId) exitsByProject.set(employee.projectId, (exitsByProject.get(employee.projectId) ?? 0) + 1)
+    }
+    const needsByProject = new Map<string, number>(), fulfilledByProject = new Map<string, number>()
+    for (const need of data.needs) if (need.projectId) needsByProject.set(need.projectId, (needsByProject.get(need.projectId) ?? 0) + 1)
+    for (const need of data.fulfilled) if (need.projectId) fulfilledByProject.set(need.projectId, (fulfilledByProject.get(need.projectId) ?? 0) + 1)
+    const areaIds = new Set(chartAreas.map((area) => area.id))
+    const chartProjects = projects.filter((project) => areaIds.has(project.areaId))
+    const top = <T extends { score: number }>(rows: T[]) => rows.filter((row) => row.score > 0).sort((a, b) => b.score - a.score).slice(0, TOP_PROJECTS)
+    return {
+      turnoverArea: chartAreas.map((area) => ({ name: area.name, exits: exitsByArea.get(area.id) ?? 0, needs: 0, fulfilled: 0, gap: 0 })),
+      turnoverProject: top(chartProjects.map((project) => ({ name: project.name.replace('Project ', ''), exits: exitsByProject.get(project.id) ?? 0, needs: 0, fulfilled: 0, gap: 0, score: exitsByProject.get(project.id) ?? 0 }))),
+      fulfillmentProject: top(chartProjects.map((project) => ({ name: project.name.replace('Project ', ''), exits: 0, needs: needsByProject.get(project.id) ?? 0, fulfilled: fulfilledByProject.get(project.id) ?? 0, gap: 0, score: needsByProject.get(project.id) ?? 0 }))),
+    }
+  }, [chartAreas, data.exits, data.fulfilled, data.needs, employees, projects])
+  const { turnoverArea, turnoverProject, fulfillmentProject } = charts
+  const gapArea = chartAreas.map((area) => { const values = data.fulfilled.filter((need) => need.areaId === area.id && need.gapWorkingDays !== null).map((need) => need.gapWorkingDays ?? 0); return { name: area.name, exits: 0, needs: 0, fulfilled: 0, gap: values.length ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(1)) : 0 } })
+  const drillNeeds: ReplacementNeed[] = drill === 'FULFILLED' ? data.fulfilled : drill === 'OPEN' ? data.open : drill === 'OVER_SLA' ? data.overSla : []
+  const drillTitle = kpis.find((item) => item.key === drill)?.label ?? ''
+  if (importStorageReady && employees.length === 0) return <>
+    <PageHeader eyebrow="WORKFORCE OVERVIEW" title={`Selamat datang, ${user.name.split(' ')[0]}`} description="Dashboard menggunakan data import dan transaksi yang tersedia di browser ini." />
+    <EmptyState title="Belum ada data workforce" description="Import file .xlsx melalui menu Import Excel. KPI, chart, dan analytics tidak menampilkan data sintetis pada mode Import-Only." />
+  </>
+  return <>
+    <PageHeader eyebrow="WORKFORCE OVERVIEW" title={`Selamat datang, ${user.name.split(' ')[0]}`} description="Setiap KPI dapat dijelaskan hingga record sumbernya." />
+    <section className="card dashboard-filters"><div><label>Periode mulai<input type="date" value={filters.dateFrom} onChange={(event) => update('dateFrom', event.target.value)} /></label><span className="date-separator">—</span><label>Sampai<input type="date" value={filters.dateTo} onChange={(event) => update('dateTo', event.target.value)} /></label></div><div><label>Area<select value={filters.areaId} disabled={Boolean(lockedArea)} onChange={(event) => update('areaId', event.target.value)}><option value="">Semua Area</option>{chartAreas.map((area) => <option value={area.id} key={area.id}>{area.name}</option>)}</select></label><label>Project<select value={filters.projectId} onChange={(event) => update('projectId', event.target.value)}><option value="">Semua Project</option>{projects.filter((project) => (!filters.areaId || project.areaId === filters.areaId) && chartAreas.some((area) => area.id === project.areaId)).map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><label>Position<select value={filters.position} onChange={(event) => update('position', event.target.value)}><option value="">Semua Position</option>{positions.map((position) => <option key={position}>{position}</option>)}</select></label><label>Status<select value={filters.status} onChange={(event) => update('status', event.target.value)}><option value="">Semua Status</option>{Object.entries(replacementLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></div></section>
+    <div className="kpi-grid">{kpis.map(({ key, label, value, note, tone, icon: Icon }) => <button type="button" className={`card kpi-card ${tone} ${key ? 'clickable' : ''}`} key={label} onClick={() => key && setDrill(key)}><div className="kpi-top"><span className="kpi-icon"><Icon /></span>{key && <small>Lihat data</small>}</div><strong>{value}</strong><h3>{label}</h3><p>{note}</p></button>)}</div>
+    <p className="target-fulfillment">Target Fulfillment: ≤ 3 working days <span>· Demo assumption: historical exit dan replacement diestimasi dari master import</span> · <Link to="/projects">Project drill-down</Link> · <Link to="/reports/analytics">Monthly Summary</Link></p>
+    {dataSource === 'api' ? <ComplianceSection areaId={filters.areaId} /> : <section className="card contract-reminder"><div className="chart-heading"><div><h2>Kontrak Mendekati Berakhir</h2><p>Informasi berdasarkan tanggal bisnis {formatDate(referenceDate)}.</p></div><span>INFORMATIONAL ONLY</span></div><div className="contract-categories">{(['D-30', 'D-14', 'D-7', 'EXPIRED'] as ContractReminderCategory[]).map((category) => <button key={category} onClick={() => setDrill('CONTRACT')}><span>{category === 'EXPIRED' ? 'Expired' : category}</span><strong>{contractReminders.filter((item) => item.category === category).length}</strong><small>{category === 'EXPIRED' ? 'Sudah berakhir' : 'Perlu perhatian'}</small></button>)}</div></section>}
+    <div className="charts-grid analytics-grid">{[
+      { title: 'Turnover by Area', note: 'Validated exit', data: turnoverArea, bars: [['exits', 'Turnover', '#173f5f']] },
+      { title: 'Turnover by Project', note: `Validated exit · ${TOP_PROJECTS} project teratas`, data: turnoverProject, bars: [['exits', 'Turnover', '#24587c']] },
+      { title: 'Fulfillment by Project', note: `Needs vs completed · ${TOP_PROJECTS} project teratas`, data: fulfillmentProject, bars: [['needs', 'Needs', '#b7c6d4'], ['fulfilled', 'Fulfilled', '#1a9b78']] },
+      { title: 'Average Gap by Area', note: 'Working days', data: gapArea, bars: [['gap', 'Average Gap', '#f1a53a']] },
+    ].map((chart) => <section className="card chart-card" key={chart.title}><div className="chart-heading"><div><h2>{chart.title}</h2><p>{chart.note}</p></div></div><div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><BarChart data={chart.data}><CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e8edf2" /><XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#667085', fontSize: 10 }} /><YAxis allowDecimals={false} axisLine={false} tickLine={false} /><Tooltip /><Legend />{chart.bars.map(([key, name, color]) => <Bar key={key} dataKey={key} name={name} fill={color} radius={[5, 5, 0, 0]} />)}</BarChart></ResponsiveContainer></div></section>)}</div>
+    <div className="dashboard-lower"><section className="card recent-card"><div className="chart-heading"><div><h2>Recent Employee Movement</h2><p>Structured history pada periode terpilih.</p></div></div><div className="movement-list">{[...data.movements].sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate)).slice(0, 6).map((movement) => <div className="movement-row" key={movement.id}><span className={`movement-icon ${movement.movementType.toLowerCase()}`}><Activity /></span><div><strong>{movement.movementType.replaceAll('_', ' ')}</strong><p>{employees.find((employee) => employee.id === movement.employeeId)?.name} · {movement.notes}</p></div><time>{formatDate(movement.effectiveDate)}</time></div>)}</div></section><section className="card sla-card"><div className="chart-heading"><div><h2>SLA Snapshot</h2><p>Status replacement dalam filter aktif.</p></div></div><div className="sla-score"><span>{data.fulfillmentRate}%</span><div><strong>Fulfillment Rate</strong><p>{data.fulfilled.length} dari {data.needs.length} kebutuhan</p></div></div><div className="sla-list">{data.needs.slice(0, 5).map((need) => <div key={need.id}><span>{need.id.toUpperCase()}</span><strong>{need.gapWorkingDays === null ? '—' : `${need.gapWorkingDays} hari`}</strong><StatusBadge tone={replacementTone(need.status)}>{replacementLabels[need.status]}</StatusBadge></div>)}</div><div className="rule-note compact-note">DEMO ASSUMPTION: SLA ≤ 3 hari kerja; kalender Senin–Jumat.</div></section></div>
+    {drill && <div className="drawer-backdrop" onClick={() => setDrill(null)}><aside className="drill-drawer" onClick={(event) => event.stopPropagation()}><div className="drawer-head"><div><span>FILTERED KPI DETAIL</span><h2>{drillTitle}</h2><p>{drill === 'CONTRACT' ? `Reference ${formatDate(DEMO_TODAY)}` : `${filters.dateFrom} sampai ${filters.dateTo}`}</p></div><button className="icon-button" onClick={() => setDrill(null)} aria-label="Tutup"><X /></button></div><div className="drawer-body">{drill === 'CONTRACT' ? <table><thead><tr><th>Employee</th><th>Placement</th><th>Contract End</th><th>Category</th></tr></thead><tbody>{contractReminders.map(({ employee, category, daysRemaining }) => <tr key={employee.id}><td><strong>{employee.name}</strong><small>{employee.personnelId}</small></td><td>{areas.find((area) => area.id === employee.areaId)?.name}<small>{projects.find((project) => project.id === employee.projectId)?.name}</small></td><td>{formatDate(employee.contractEndDate)}<small>{daysRemaining < 0 ? `${Math.abs(daysRemaining)} hari lewat` : `${daysRemaining} hari lagi`}</small></td><td><StatusBadge tone={category === 'EXPIRED' ? 'danger' : 'warning'}>{category}</StatusBadge></td></tr>)}</tbody></table> : drill === 'ACTIVE' ? <table><thead><tr><th>Employee</th><th>Area / Project</th><th>Position</th></tr></thead><tbody>{data.activeEmployees.map((employee) => <tr key={employee.id}><td><strong>{employee.name}</strong><small>{employee.personnelId}</small></td><td>{areas.find((area) => area.id === employee.areaId)?.name}<small>{projects.find((project) => project.id === employee.projectId)?.name}</small></td><td>{employee.position}</td></tr>)}</tbody></table> : drill === 'EXITS' ? <table><thead><tr><th>Employee Exit</th><th>Exit Date</th><th>Reason</th></tr></thead><tbody>{data.exits.map((exit) => <tr key={exit.id}><td><strong>{employees.find((employee) => employee.id === exit.employeeId)?.name}</strong></td><td>{formatDate(exit.exitDate)}</td><td>{exit.exitReason}</td></tr>)}</tbody></table> : <table><thead><tr><th>Employee Exit / Replacement</th><th>Placement</th><th>Exit / Join</th><th>Gap</th><th>Status</th></tr></thead><tbody>{drillNeeds.map((need) => <tr key={need.id}><td><strong>{employees.find((employee) => employee.id === need.originalEmployeeId)?.name}</strong><small>{employees.find((employee) => employee.id === need.replacementEmployeeId)?.name ?? 'Belum dipilih'}</small></td><td>{areas.find((area) => area.id === need.areaId)?.name}<small>{projects.find((project) => project.id === need.projectId)?.name} · {need.position}</small></td><td>{formatDate(need.exitDate)}<small>{formatDate(need.replacementJoinDate)}</small></td><td>{need.gapWorkingDays === null ? '—' : `${need.gapWorkingDays} hari`}</td><td><StatusBadge tone={replacementTone(need.status)}>{replacementLabels[need.status]}</StatusBadge></td></tr>)}</tbody></table>}</div></aside></div>}
+  </>
+}

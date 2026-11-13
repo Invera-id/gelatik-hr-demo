@@ -1,0 +1,14 @@
+{
+  "name": "@gelatik/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "OpenAPI contract for the Gelatik HR API and generated TypeScript types.",
+  "scripts": {
+    "generate": "openapi-typescript openapi.yaml -o ../../apps/web/src/api/schema.d.ts",
+    "check": "node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0"
+  }
+}

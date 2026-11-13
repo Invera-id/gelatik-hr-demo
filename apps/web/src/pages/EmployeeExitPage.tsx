@@ -1,0 +1,26 @@
+import { AlertTriangle, ArrowLeft, Save, Send } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
+import { PageHeader } from '../components/PageHeader'
+import { ActionError } from '../components/ActionError'
+import { useDemo } from '../context/DemoContext'
+import { canAccessEmployee, hasCompleteSourceData } from '../lib/businessRules'
+import type { EmployeeExit } from '../types'
+
+export function EmployeeExitPage() {
+  const { employeeId } = useParams(); const { currentUser, areas, employees, projects, employeeExits, permissionConfig, saveExit } = useDemo(); const navigate = useNavigate()
+  const employee = employees.find((item) => item.id === employeeId); const existing = employeeExits.find((item) => item.employeeId === employeeId && ['DRAFT', 'SUBMITTED', 'REVISION_REQUIRED'].includes(item.validationStatus))
+  const [exitDate, setExitDate] = useState(existing?.exitDate ?? ''); const [reason, setReason] = useState(existing?.exitReason ?? ''); const [replacementRequired, setReplacementRequired] = useState(existing?.replacementRequired ?? true); const [intent, setIntent] = useState<'DRAFT' | 'SUBMITTED'>('DRAFT'); const [error, setError] = useState(''); const [saving, setSaving] = useState(false)
+  if (!currentUser || !employee || !canAccessEmployee(currentUser, employee, permissionConfig)) return <Navigate to="/employees" replace />
+  const area = areas.find((item) => item.id === employee.areaId); const project = projects.find((item) => item.id === employee.projectId)
+  const submit = async (event: FormEvent) => { event.preventDefault(); if (saving) return; const now = new Date().toISOString(); const exit: EmployeeExit = { id: existing?.id ?? `exit-${now}`, employeeId: employee.id, exitDate, exitReason: reason, replacementRequired, createdBy: existing?.createdBy ?? currentUser.id, validationStatus: intent, validatedBy: null, validatedAt: null, submittedAt: intent === 'SUBMITTED' ? now : existing?.submittedAt ?? null, revisionNote: intent === 'SUBMITTED' ? null : existing?.revisionNote ?? null, createdAt: existing?.createdAt ?? now, updatedAt: now }; setSaving(true); const result = await saveExit(exit); setSaving(false); if (result.ok) navigate(`/employees/${employee.id}`); else setError(result.error ?? 'Gagal menyimpan.') }
+  return <><Link to={`/employees/${employee.id}`} className="back-link"><ArrowLeft size={16} /> Kembali ke Employee Detail</Link><PageHeader eyebrow="EMPLOYEE MOVEMENT" title="Employee Exit" description="Catat pergerakan keluar dan kebutuhan pengganti untuk proses validasi HR." />
+    <ActionError message={error} />
+    {existing?.validationStatus === 'REVISION_REQUIRED' && <div className="alert warning"><div><strong>Perlu revisi</strong><p>{existing.revisionNote || 'Periksa kembali data exit sebelum dikirim ulang.'}</p></div></div>}
+    {!hasCompleteSourceData(employee) && replacementRequired && <div className="alert warning"><AlertTriangle /><div><strong>Replacement tidak dapat diproses sampai data sumber lengkap</strong><p>Area, Project, dan Posisi harus dilengkapi oleh pihak pemilik data sebelum proses fulfillment dapat dilakukan.</p></div></div>}
+    <form className="card form-card" onSubmit={submit}><div className="employee-summary"><span className="initials large">{employee.name.split(' ').map((part) => part[0]).slice(0, 2).join('')}</span><div><span>EMPLOYEE YANG DIPILIH</span><h2>{employee.name}</h2><p>{employee.personnelId} · {area?.name ?? 'Area belum tersedia'} · {project?.name ?? 'Project belum tersedia'} · {employee.position ?? 'Posisi belum tersedia'}</p></div></div>
+      <div className="form-grid compact"><label>Exit Date *<input type="date" required value={exitDate} onChange={(event) => setExitDate(event.target.value)} /></label><label>Exit Reason *<select required value={reason} onChange={(event) => setReason(event.target.value)}><option value="">Pilih alasan</option><option>Mengundurkan diri</option><option>Kontrak berakhir</option><option>Terminasi</option><option>Rotasi kebutuhan proyek</option><option>Lainnya</option></select></label></div>
+      <fieldset className="radio-group"><legend>Replacement Required?</legend><label className={replacementRequired ? 'selected' : ''}><input type="radio" checked={replacementRequired} onChange={() => setReplacementRequired(true)} /> <span><strong>Ya, butuh pengganti</strong><small>Replacement Need dibuat setelah HR memvalidasi exit.</small></span></label><label className={!replacementRequired ? 'selected' : ''}><input type="radio" checked={!replacementRequired} onChange={() => setReplacementRequired(false)} /> <span><strong>Tidak perlu pengganti</strong><small>Proses selesai setelah exit tervalidasi.</small></span></label></fieldset>
+      <div className="form-actions"><Link className="button ghost" to={`/employees/${employee.id}`}>Batal</Link><button className="button secondary" type="submit" onClick={() => setIntent('DRAFT')}><Save size={17} /> Simpan Draft</button><button className="button primary" type="submit" onClick={() => setIntent('SUBMITTED')}><Send size={17} /> Submit for Validation</button></div>
+    </form></>
+}

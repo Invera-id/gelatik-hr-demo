@@ -1,110 +1,243 @@
-# Gelatik HR — Workforce Monitoring Demo V3
+# Gelatik HR — Workforce Monitoring
 
-Frontend-only React/Vite prototype untuk memvalidasi requirement workforce movement, turnover, replacement, fulfillment, dan monitoring PT Gelatik Supra. Build default tidak membawa seed employee; data uji disimpan lokal di browser.
+Aplikasi web untuk memantau dan mengelola tenaga kerja lapangan (personel outsourcing) PT Gelatik Supra. Dikembangkan oleh Invera.
 
-> **Import-Only Environment** — Repository tidak memuat data employee aktual PT Gelatik Supra. Jangan commit, log, screenshot, atau deploy workbook internal.
+> Repository ini **tidak** memuat data personel asli PT Gelatik Supra. Semua seed dan fixture bersifat sintetis. Jangan commit, log, screenshot, atau deploy workbook internal.
 
-## Menjalankan aplikasi
+## Tentang project
+
+Gelatik menempatkan ribuan personel (sales, promotor, SDO, admin, team leader) di berbagai area, project, dan client. Data mereka selama ini tersebar di workbook Excel. Aplikasi ini menggantikannya dengan satu sistem yang:
+
+- menyimpan **master personel** beserta riwayat penempatan, mutasi, exit, dan re-entry;
+- memastikan setiap perubahan data **diajukan dulu lalu divalidasi HR** sebelum berlaku;
+- membatasi akses per **role** dan per **area**.
+
+### Pengguna
+
+| Role | Tugas utama | Cakupan data default |
+|---|---|---|
+| Area Supporting | Input personel baru, ajukan perubahan/mutasi/exit, unggah dokumen | Area sendiri |
+| HR Head Office | Import Excel, validasi pengajuan, periksa dokumen | Semua area |
+| Operational Manager | Memantau dashboard & laporan | Semua area, read-only |
+| BoD / GM | Memantau dashboard & laporan | Semua area, read-only |
+| Super Admin | Konfigurasi role, permission, ambang kontrak | Semua area |
+
+### Fitur
+
+- **Import Excel personel.** Hanya sheet bernama `Database` yang dibaca, dan kolom dikenali dari nama header. Peringatan per baris dan kolom ditampilkan **sebelum** data disimpan. Baris dengan Personnel ID yang sama direkonsiliasi menjadi duplikasi, mutasi, exit, atau re-entry, lalu masuk antrean review. Aturan lengkapnya ada di [docs/IMPORT_RULES.md](docs/IMPORT_RULES.md).
+- **Master personel.** Tersedia daftar, pencarian, dan detail lengkap (identitas, domisili, kontak, penempatan, riwayat karir, catatan). Export ke Excel juga tersedia.
+- **Pengajuan & validasi HR.** Pengajuan mencakup entry baru, edit data dasar, mutasi/penempatan, dan exit. Halaman Validasi menampilkan pemeriksaan otomatis per pengajuan (**Siap / Perlu dicek / Tertahan**) beserta alasannya, sehingga HR tidak perlu membuka detail satu per satu. "Validasi Semua" hanya memproses pengajuan tanpa temuan.
+- **Replacement & fulfillment.** Exit yang sudah divalidasi otomatis membuat kebutuhan pengganti.
+- **Monitoring kontrak.** Status (akan berakhir / sudah berakhir / data belum lengkap) dihitung dari tanggal berakhir kontrak. Ambang pengingat bisa dikonfigurasi.
+- **PKWT (kontrak kerja) karyawan.** Setiap karyawan aktif yang belum punya PKWT yang diterima HR diberi peringatan (di daftar karyawan, detail, Validasi, dashboard, dan halaman **Kelengkapan PKWT**). PKWT diunggah dari detail karyawan kapan saja ke storage privat, lalu diperiksa HR (diterima / ditolak dengan alasan), dan riwayat versinya tersimpan. Peringatan ini **tidak** menghalangi validasi.
+- **Dashboard & laporan.** Tersedia jumlah personel, turnover, quota project, serta kepatuhan kontrak dan dokumen yang bisa diklik ke daftar detail.
+- **Notifikasi in-app & audit log.** Setiap aksi penting tercatat.
+
+Hal yang **tidak** termasuk: payroll, absensi, integrasi BPJS, email, atau WhatsApp.
+
+### Teknologi
+
+```
+apps/web/            Frontend: React 19 + TypeScript + Vite
+apps/api/            Backend: Go + Fiber v3 + PostgreSQL (pgx v5)
+  cmd/api/           Perintah: serve | migrate | seed | user create
+  internal/          api (HTTP) · service (workflow) · domain & imports (aturan bisnis) · auth · access · db · storage
+  internal/db/migrations/   Migration SQL berversi
+packages/contracts/  openapi.yaml (kontrak API) + generator tipe TypeScript
+docs/                Spesifikasi, aturan import, progres, requirement terbaru
+compose.yaml         PostgreSQL lokal (+ service api opsional)
+Makefile             Kumpulan perintah
+```
+
+Server adalah penentu akhir untuk login, hak akses, cakupan area, dan seluruh aturan bisnis. Pemeriksaan di frontend hanya untuk kenyamanan pengguna.
+
+## Cara menjalankan (development)
+
+### 1. Prasyarat
+
+- Node.js 24+ (npm 11)
+- Go 1.26+
+- Docker Desktop (untuk PostgreSQL)
+
+Port yang dipakai: `5173` (frontend), `8080` (backend), dan `55432` (PostgreSQL).
+
+### 2. Persiapan (sekali saja)
+
+Install dependensi frontend:
 
 ```bash
 npm install
-npm run dev
 ```
 
-Quality checks:
+Nyalakan PostgreSQL. Database `gelatik_hr` dan `gelatik_hr_test` dibuat otomatis:
 
 ```bash
-npm run lint
-npm run test
-npm run build
+make db-up
 ```
 
-Pada PowerShell dengan execution policy terbatas, gunakan `npm.cmd`. Production build berada di `dist/`.
+Buat tabel:
 
-## Akun demo
+```bash
+make migrate
+```
 
-Semua akun menggunakan password `password`.
+Buat akun demo:
 
-| Role | Email | Default scope | Karakter akses |
-|---|---|---|---|
-| Area Supporting / Data Input | `bandung@demo.test` | Area Sendiri (Bandung) | Data entry, movement, dan Import Excel dalam scope |
-| HR Head Office | `hr@demo.test` | All Areas | Validation, matching, fulfillment, import/export |
-| Operational / Manager | `operations@demo.test` | All Areas | Read-only monitoring |
-| BoD / GM | `management@demo.test` | All Areas | Read-only management view |
-| Super Admin | `superadmin@demo.test` | All Areas | Demo configuration dan seluruh fitur |
+```bash
+make seed
+```
 
-## Route utama
+`make seed` hanya membuat **5 akun demo** dan satu area `Bandung`, karena akun Area Support harus terikat ke sebuah area. Data personel, project, dan jenis dokumen tidak di-seed; data itu masuk lewat import Excel atau UI. Seed ditolak bila `APP_ENV=production`.
 
-| Route | Fungsi |
+### 3. Jalankan aplikasi
+
+Jalankan backend dan frontend di **dua terminal** terpisah.
+
+Terminal 1, backend di http://localhost:8080:
+
+```bash
+make api
+```
+
+Terminal 2, frontend di http://localhost:5173:
+
+```bash
+make web
+```
+
+Lalu buka **http://localhost:5173**. Frontend meneruskan `/api` ke backend, jadi tidak perlu pengaturan CORS.
+
+### 4. Login
+
+Semua akun demo memakai password **`gelatik-dev-password`**. Password ini bisa diganti lewat env `SEED_DEMO_PASSWORD` saat menjalankan `make seed`.
+
+| Email | Role |
 |---|---|
-| `/dashboard` | KPI, filter, charts, drill-down, SLA, kontrak, recent movement |
-| `/employees` | Master Employee, Client filter, dan derived Employee Aktif tab |
-| `/projects` | Master Project CRUD/status dan list sesuai scope |
-| `/projects/:id` | Project Overview, Workforce, Monthly, Termination Analytics |
-| `/reports/analytics` | Monthly Client Summary, Client Quota, Pengakhiran Perjanjian |
-| `/employees/new` | Employee Entry |
-| `/employees/:id` | Current state, notes, flag, career timeline |
-| `/employees/:id/edit` | Basic edit / revision |
-| `/employees/:id/exit` | Employee Exit / revision |
-| `/employees/:id/movement` | Promotion, mutation, dan placement change |
-| `/employees/:id/reentry` | Re-entry dengan historical warning |
-| `/movements` | Employee Movement History |
-| `/validation` | Entry, exit, dan movement validation queue |
-| `/replacements` | Replacement & Fulfillment monitor |
-| `/replacements/:id` | Matching, fulfillment, dan replacement chain |
-| `/reports/export` | Lima jenis export `.xlsx` sesuai filter/scope |
-| `/import` | Controlled `.xlsx` preview/validation/import dan antrean review sesuai permission/scope |
-| `/settings/access` | Demo RBAC matrix (`manage_roles`) |
-| `/settings/validation` | Validation policy (`manage_validation_policy`) |
+| `superadmin@demo.test` | Super Admin |
+| `hr@demo.test` | HR Head Office |
+| `bandung@demo.test` | Area Supporting (Bandung) |
+| `operations@demo.test` | Operational Manager |
+| `management@demo.test` | BoD / GM |
 
-## Data, Excel, dan reset
+### 5. Alur mencoba
 
-- Mode default adalah `IMPORT_ONLY`. Seed workforce hanya aktif bila build secara eksplisit memakai `VITE_DEMO_DATA_MODE=SAMPLE`.
-- Import-only memakai namespace `gelatik-import-only-data-v1`, sehingga seed lama pada `gelatik-demo-data-v2` tidak dimuat. Data import tetap berada di IndexedDB `gelatik-personnel-db`.
-- Menu profile mereset transaksi lokal tanpa menghapus personnel, batch, source records, exceptions, atau review items hasil import.
-- Sesi login memakai `sessionStorage`; notifikasi disimpan pada namespace terpisah per mode.
-- Export `.xlsx` diproses di browser; CSV menjadi fallback bila workbook gagal dibuat.
+1. Login sebagai `hr@demo.test`, buka **Import Excel**, lalu unduh template atau pilih workbook `.xlsx` yang punya sheet `Database`.
+2. Periksa tabel peringatan di preview, lalu klik **Konfirmasi & Simpan**.
+3. Buka **Validation**. Lihat kartu Siap / Perlu dicek / Tertahan, periksa temuannya, lalu validasi.
+4. Buka detail karyawan yang bertanda **PKWT belum ada**, unggah PKWT (PDF/JPG/PNG), lalu terima sebagai HR. Peringatannya akan hilang.
+5. (Opsional) Login sebagai `superadmin@demo.test` untuk mengatur ambang pengingat di **Monitoring Kontrak**.
+6. Login sebagai `bandung@demo.test` untuk mencoba input personel baru dan mengunggah dokumen dari halaman detail personel.
 
-## Import Excel Personil (83 kolom)
+### Mengosongkan database development
 
-Fitur impor ada di menu **Import Excel** ketika permission **Mengimpor Excel Personel** aktif, termasuk untuk `bandung@demo.test`, dengan alur `Pilih .xlsx → Parse → Validate → Preview → Confirm → Commit`. Cancel pada tahap preview tidak mengubah IndexedDB.
+Perintah ini menghapus **semua** data di database dev lalu membuat ulang tabel dan akun demo:
 
-- **Hanya sheet bernama `Database`** yang diproses (cocok persis setelah trim + normalisasi huruf). Sheet lain, termasuk `Database aktif`, diabaikan; tidak ada fallback ke sheet pertama. Jika tidak ada sheet `Database`, impor dibatalkan tanpa mengubah data.
-- Data impor disimpan **persisten di IndexedDB** (`gelatik-personnel-db`), bukan server dan bukan hanya state React — tetap ada setelah refresh/tutup browser. Daftar, detail, dan dashboard membaca sumber yang sama.
-- Workbook dengan header berubah urutan atau kolom tambahan dipetakan berdasarkan nama header. Header berulang dipasangkan berdasarkan urutan kemunculannya; kolom yang hilang menjadi kosong/NEEDS_REVIEW, bukan digeser secara positional. Warning struktur header disembunyikan sementara untuk kebutuhan demo.
-- Re-import identik idempotent berdasarkan normalized Personnel ID + fingerprint. Konflik NoKTP tidak di-merge otomatis dan tetap berada di review queue.
-- Critical field yang kosong/tidak dikenal dan mutation historis memakai guardrail `NEEDS_REVIEW`; import tidak otomatis berarti validasi HR atau kontrak `SIGNED`.
-- Import Area Supporting dibatasi sebelum reconciliation dan reference discovery. Preview memisahkan valid dalam scope, warning/review, error, dan di luar scope. Baris luar scope diberi status **“Di luar cakupan area — tidak diimpor.”**, tidak dikomit, dan tidak dapat membuat Area/Project baru.
-- Hanya `.xlsx` yang didukung. `.xls` harus disimpan ulang sebagai `.xlsx`.
-- Pipeline aktif berada di `src/lib/import/` (`columns`, `normalizers`, `workbook`, `mapping`, `parse`, `classify`, `reconcile`, `repository`, `service`).
+```bash
+docker compose exec -T db psql -U gelatik -d gelatik_hr -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && make migrate && make seed && rm -rf apps/api/var/documents
+```
 
-## Vercel
+### Masalah umum
 
-Repository menyertakan `vercel.json` untuk SPA deep-link rewrite ke `index.html`. Tidak ada backend, serverless function, database, atau environment secret.
+| Gejala | Solusi |
+|---|---|
+| Backend menolak start karena "pending migrations" | Jalankan `make migrate`, lalu `make api` lagi. |
+| `address already in use` di port 8080 atau 5173 | Masih ada server lama yang jalan. Hentikan dulu (Ctrl+C di terminalnya), atau cari prosesnya dengan `lsof -i :8080`. |
+| Tidak bisa terhubung ke database | Pastikan Docker menyala dan `make db-up` sudah dijalankan. |
+| Login gagal setelah database dikosongkan | Semua sesi ikut terhapus. Jalankan `make seed`, lalu login ulang. |
 
-1. Import repository ke Vercel.
-2. Framework preset: Vite.
-3. Build command: `npm run build`.
-4. Output directory: `dist`.
-5. Setelah deploy, uji refresh pada `/dashboard`, `/employees/employee-026`, `/projects/project-beta-bandung`, `/reports/analytics`, dan `/replacements/need-chain-002`.
+## Perintah lain
 
-## Version 3 analytics
+| Perintah | Fungsi |
+|---|---|
+| `make api` / `make web` | Menjalankan backend / frontend |
+| `make db-up` / `make db-down` | Menyalakan / mematikan PostgreSQL |
+| `make migrate` | Menerapkan migration (juga dipakai di production) |
+| `make seed` | Membuat akun demo (development) |
+| `make test-api` | gofmt, go vet, unit + integration test backend (butuh PostgreSQL) |
+| `npm run lint` · `npm run test` · `npm run build` | Pemeriksaan frontend |
+| `npm run contracts:generate` · `npm run contracts:check` | Membuat ulang / mengecek tipe TypeScript dari OpenAPI |
+| `make check` | Lint, test, build, dan cek kontrak sekaligus |
 
-Dashboard memakai istilah **Turnover** dan **Vacant** serta target fulfillment ≤ 3 hari kerja. Reference CSV di `docs/reference/` dipakai untuk membaca **header saja**; tidak ada baris employee referensi dalam aplikasi. Quota per project/bulan, Turnover %, Monthly Index, dan Pengakhiran Perjanjian adalah interpretasi demo yang perlu konfirmasi Gelatik. Lihat [V3 change log](docs/DEMO_V3_CHANGELOG.md) untuk flow presentasi dan formula.
+Untuk membuat administrator pertama (misalnya di production, tanpa seed):
 
-## Demo RBAC
+```bash
+cd apps/api && USER_PASSWORD='<min 12 karakter>' go run ./cmd/api user create --email admin@example.com --name "Admin" --role SUPER_ADMIN
+```
 
-Permission dikelompokkan menjadi Monitoring, Employee, Import & Export, Validation, Replacement & Fulfillment, Project, dan Administrasi. Sidebar, route, tombol, serta action pada `DemoContext` membaca konfigurasi yang sama. Scope memakai label **Area Sendiri**, **Area Terpilih**, atau **Semua Area**.
+## Konfigurasi
 
-- Area Supporting: data entry own-area, import own-area, movement/exit/re-entry, serta monitoring project/replacement; tidak memvalidasi atau melakukan matching/fulfillment secara default.
-- HR Head Office: semua area, employee/import/review/validation/project/replacement/export; tidak mendapat konfigurasi role secara default.
-- Operations Manager dan Management: read-only untuk dashboard, analytics, employee, movement, project, replacement, dan export.
-- Super Admin: seluruh permission aktif; permission administrasi inti dikunci agar akses konfigurasi tidak terputus.
+- **Backend:** `apps/api/.env` (didapat dari dekripsi, lihat bagian berikut). Isinya meliputi database, origin yang diizinkan, cookie sesi, batas import, `STORAGE_DIR` dan batas file dokumen, serta `BUSINESS_DATE` (khusus non-production, untuk menetapkan "hari ini").
+- **Frontend:** `apps/web/.env` (didapat dari dekripsi). Semua variabel `VITE_*` ikut masuk ke bundle publik, jadi **jangan taruh secret di sana**.
+- `VITE_DATA_SOURCE=api` (default) memakai backend. `VITE_DATA_SOURCE=local` menjalankan prototype lama yang menyimpan data di browser; mode ini tidak mendukung dokumen dan monitoring kontrak.
 
-Konfigurasi lama berbasis permission luas (`edit_employee`, `create_exit`, `validate_employee`, `validate_exit`) dimigrasikan saat startup. `manage_users` tidak ditampilkan karena belum ada fitur User Management nyata. Permission Import Excel tidak otomatis memberikan permission membuat employee manual.
+### File `.env` (terenkripsi)
 
-> Konfigurasi role pada prototype digunakan untuk simulasi kebutuhan. Struktur permission dan otorisasi production akan ditentukan kembali bersama PT Gelatik Supra.
+File `.env` asli **tidak pernah di-push**. Yang ada di repo hanyalah salinan terenkripsinya:
 
-## Batasan penting
+- `apps/api/.env.enc`
+- `apps/web/.env.enc`
 
-Prototype ini tidak menyediakan production authentication/authorization, sinkronisasi antarperangkat, database, audit guarantee, public-holiday calculation, BPJS integration, file storage, atau external notification. RBAC dan scope berbasis frontend/localStorage mencegah aksi di dalam demo, tetapi bukan batas keamanan production. Exact matching, SLA tiga hari, calendar Senin–Jumat, contract gate, cross-area behavior, validation ownership, quota manual vs turunan master, dan flag treatment masih **DEMO ASSUMPTION / TBC**.
+Alat untuk membukanya **tidak ada di repo**. File `decrypt-env.mjs` berisi kuncinya dan dibagikan pemilik project secara pribadi. Alat ini hanya memakai Node.js bawaan (AES-256-GCM), jadi jalan di Windows, macOS, dan Linux.
+
+Membuka (rekan tim):
+
+1. Simpan `decrypt-env.mjs` yang kamu terima di folder root project.
+2. Jalankan dari folder root:
+
+   ```bash
+   node decrypt-env.mjs
+   ```
+
+3. Hasilnya `apps/api/.env` dan `apps/web/.env`.
+
+- File `.env` yang sudah ada tidak ditimpa. Tambahkan `--force` untuk menimpanya.
+- `decrypt-env.mjs` sudah di-ignore git, jadi tidak akan ikut ter-push.
+- `make migrate`, `make seed`, dan `make api` otomatis membaca `apps/api/.env`.
+- Vite otomatis membaca `apps/web/.env`.
+- Di Windows tanpa `make`, set variabel dari `apps/api/.env` di shell sebelum menjalankan `go run ./cmd/api serve`.
+
+Mengubah isi `.env` (pemilik): edit `apps/api/.env` dan/atau `apps/web/.env`, lalu jalankan:
+
+```bash
+node env-tools/encrypt-env.mjs
+```
+
+Setelah itu commit dan push file `.env.enc` yang berubah. Folder `env-tools/` (berisi kunci) di-ignore git. **Simpan cadangannya di tempat aman**: tanpa kunci itu, file `.env.enc` tidak bisa dibuka lagi.
+
+## Deployment (belum ada deploy aktif)
+
+- **Backend:** container dari `apps/api/Dockerfile` (distroless, non-root). Urutan rilis:
+  1. Backup database.
+  2. `api migrate`.
+  3. Rollout `api serve`.
+
+  Server menolak start bila ada migration tertunda. Wajib di production:
+  - `APP_ENV=production`
+  - `SESSION_COOKIE_SECURE=true`
+  - HTTPS
+  - `STORAGE_DIR` pada volume privat yang persisten (default image: `/data/documents`)
+- **Frontend:** hosting statis dari `apps/web`, build `npm run build`, output `dist`, dengan SPA rewrite ke `/index.html`.
+- **Topologi yang disarankan:** satu domain, dengan reverse proxy yang meneruskan `/api/*` ke backend dan sisanya ke frontend. Dengan begitu cookie tetap first-party dan CORS tidak diperlukan.
+- Frontend versi terbaru membutuhkan backend versi terbaru, jadi rilis keduanya bersama. Detailnya ada di [docs/REQUIREMENTS_2026-11-10.md](docs/REQUIREMENTS_2026-11-10.md).
+- **CI:** [.github/workflows/ci.yml](.github/workflows/ci.yml). Jadikan job `ci-ok` sebagai required check.
+
+## Dokumentasi
+
+- [docs/BACKEND_PROGRESS.md](docs/BACKEND_PROGRESS.md): arsitektur, matriks fitur, asumsi/TBC, batasan, dan hasil pengujian
+- [docs/IMPORT_RULES.md](docs/IMPORT_RULES.md): aturan import Excel dan rekonsiliasi
+- [docs/REQUIREMENTS_2026-11-10.md](docs/REQUIREMENTS_2026-11-10.md): monitoring kontrak, PKWT karyawan, validasi input, kesiapan validasi, dan pertanyaan bisnis yang masih terbuka
+- [packages/contracts/openapi.yaml](packages/contracts/openapi.yaml): kontrak API (prefix `/api/v1`)
+
+## Batasan & asumsi
+
+Beberapa aturan masih **asumsi yang perlu dikonfirmasi (TBC)**, belum kebijakan final Gelatik:
+
+- exact matching
+- SLA ≤ 3 hari kerja
+- contract gate
+- kewenangan validasi
+- quota dan formula turnover
+- arti "kontrak 4 tahun"
+- target finance
+
+Detailnya ada di dokumen di atas.
